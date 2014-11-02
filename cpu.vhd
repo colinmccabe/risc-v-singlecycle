@@ -8,7 +8,7 @@ end cpu;
 
 architecture Synthesizable of cpu is
 
-   signal instr : STD_LOGIC_VECTOR(31 downto 0);
+   signal inst : STD_LOGIC_VECTOR(31 downto 0);
    signal pc : STD_LOGIC_VECTOR(12 downto 0);
    
    signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
@@ -67,37 +67,68 @@ architecture Synthesizable of cpu is
       end BOOL_TO_SL;
 
 begin
+   -- Instruction-derived control signals
+   opcode <= inst(6 downto 0);
+   
+   rs1 <= inst(19 downto 15);
+   rs2 <= inst(24 downto 20);
+   rd <= inst(11 downto 7);
+   
+   funct3 <= inst(14 downto 12);
+   funct7 <= inst(31 downto 25);
+   
+   lui <= BOOL_TO_SL(opcode = "0110111");
+   jal <= BOOL_TO_SL(opcode = "1101111");
+   jalr <= BOOL_TO_SL(opcode = "1100111");
+   branch <= BOOL_TO_SL(opcode = "1100011");
    stor <= BOOL_TO_SL(opcode = "0000011");
    load <= BOOL_TO_SL(opcode = "0100011");
+   arith_imm <= BOOL_TO_SL(opcode = "0010011");
+   arith_reg <= BOOL_TO_SL(opcode = "0110011");
+   
+   I_type <= arith_imm;
    
    
-   
-   jumping <= jump or (branch and alu_out(0));
-   
-   rf_we <= (load and (not load_2nd_cycle))
-            or (not stall_l)
-            or jumping;
-   
-   rs1 <= instr(19 downto 15);
-   rs2 <= instr(24 downto 20);
-   
+   -- Immediates
+   I_imm <= inst(31 downto 20);
+   S_imm <= inst(31 downto 25) & inst(11 downto 7);
+   SB_imm <= inst(31) & inst(7) & inst(30 downto 25) & inst(11 downto 8);
+   U_imm <= inst(31 downto 12);
+   UJ_imm <= inst(31) & inst(19 downto 12) & inst(20) & inst(30 downto 21);
+
+   -- ALU operand selection
    x <= s1;
    
-   y <= instr(31 downto 25) & instr(11 downto 7) when S_type_instr = '1'  else
-        instr(31 downto 20)                      when I_type_instr = '1'  else
-                                                 when SB_type_instr = '1' else
+   y <= I_imm  when I_type = '1'  else
+        S_imm  when S_type = '1' else
+        SB_imm when SB_type = '1'  else
         s2;
         
-   rf_data_in <= pc when jal = '1' else
+   alu_output_true <= alu_out(0);
+
+
+   -- Register file   
+   rf_data_in <= x"00000" & pc when jal = '1' else
+                 U_imm & x"000" when lui = 1' else
                  data_mem_out when load = '1' else
                  alu_out;
-        
-   jmp_or_branch_addr <= 
+                 
+   rf_we <= (load and load_2nd_cycle)
+               or arith
+               or jal
+               or jalr
+               or lui;
+
+
+   -- PC calculation
+   do_jump <= jump or (branch and alu_output_true);
+   jmp_or_branch_addr <= SIGNED(pc) + SIGNED(SB_imm) when branch = '1' else
+                         
 
    Inst_prog_mem : prog_mem PORT MAP (
       clka => clk,
       addra => pc,
-      douta => instr
+      douta => inst
    );
   
    Inst_data_mem : data_mem PORT MAP (
