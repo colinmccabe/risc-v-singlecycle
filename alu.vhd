@@ -4,9 +4,10 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity alu is
     Port ( x_in : in  STD_LOGIC_VECTOR (31 downto 0);
-           y_vin : in  STD_LOGIC_VECTOR (31 downto 0);
-           opcode5 : in  STD_LOGIC;
+           y_in : in  STD_LOGIC_VECTOR (31 downto 0);
+           opcode : in  STD_LOGIC_VECTOR(6 downto 0);
            funct3 : in  STD_LOGIC_VECTOR (2 downto 0);
+           shamt : in STD_LOGIC_VECTOR(4 downto 0);
            funct7 : in  STD_LOGIC_VECTOR (6 downto 0);
            output : out STD_LOGIC_VECTOR(31 downto 0)
            );
@@ -15,7 +16,18 @@ end alu;
 architecture Synthesizable of alu is
 
    signal x, y, output_signed : SIGNED(31 downto 0);
-   signal true_val : SIGNED(31 downto 0);
+   signal true_val, bshift_out : STD_LOGIC_VECTOR(31 downto 0);
+   signal left : STD_LOGIC;
+
+   COMPONENT bshift
+      PORT(
+         left : IN std_logic;
+         logical : IN std_logic;
+         shift : IN std_logic_vector(4 downto 0);
+         input : IN std_logic_vector(31 downto 0);          
+         output : OUT std_logic_vector(31 downto 0)
+      );
+   END COMPONENT;
 
 begin
    x <= SIGNED(x_in);
@@ -24,14 +36,27 @@ begin
    true_val <= (0 => '1', others => '0');
 
    output_signed <=
-      x - y    when funct3 = "000" and opcode5 = '1' and funct7(5) = '1' else
-      x + y    when funct3 = "000" else
-      true_val when funct3 = "010" and x < y else
-      true_val when funct3 = "011" and x_vec < y_vec else
-      x xor y  when funct3 = "100" else
-      x or y   when funct3 = "110" else
+      x - y       when funct3 = "000" and opcode(5) = '1' and funct7(5) = '1' else
+      x + y       when funct3 = "000" else
+      x xor y     when funct3 = "100" else
+      x or y      when funct3 = "110" else
       x and y;
              
-   output <= STD_LOGIC_VECTOR(output_signed);
+   output <= bshift_out when (funct3 = "001" or funct3 = "101") and opcode(5) = '0' else 
+             true_val    when funct3 = "010" and x < y else
+             true_val    when funct3 = "011" and x_in < y_in else
+             STD_LOGIC_VECTOR(output_signed);
+   
+   -- Bit shifter
+   
+   left <= not funct3(2);
+   
+   Inst_bshift: bshift PORT MAP(
+		left => left,
+		logical => funct7(5),
+		shift => shamt,
+		input => x_in,
+		output => bshift_out
+	);
              
 end Synthesizable;

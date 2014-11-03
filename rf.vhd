@@ -9,7 +9,8 @@ entity rf is
            rs1 : in  STD_LOGIC_VECTOR (4 downto 0);
            rs2 : in  STD_LOGIC_VECTOR (4 downto 0);
            s1 : out  STD_LOGIC_VECTOR (31 downto 0);
-           s2 : out  STD_LOGIC_VECTOR (31 downto 0)
+           s2 : out  STD_LOGIC_VECTOR (31 downto 0);
+           reg_peek : out STD_LOGIC_VECTOR(15 downto 0)
           );
 end rf;
 
@@ -19,6 +20,8 @@ architecture Synthesizable of rf is
    signal reg_file : reg_array;
    
 begin
+
+   reg_peek <= reg_file(1)(15 downto 0);
    
    with rs1 select
       s1 <= (others => '0') when "00000",

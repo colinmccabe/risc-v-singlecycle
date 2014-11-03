@@ -1,5 +1,6 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
 
 entity cpu is
     Port ( clk : in  STD_LOGIC;
@@ -9,11 +10,27 @@ end cpu;
 architecture Synthesizable of cpu is
 
    signal inst : STD_LOGIC_VECTOR(31 downto 0);
-   signal pc : STD_LOGIC_VECTOR(12 downto 0);
+   signal pc, jump_or_branch_addr : STD_LOGIC_VECTOR(12 downto 0);
    
    signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
+   signal x, y : STD_LOGIC_VECTOR(31 downto 0);
    
    signal rs1, rs2, rd : STD_LOGIC_VECTOR(4 downto 0);
+   
+   signal opcode : STD_LOGIC_VECTOR(6 downto 0);
+   signal shamt : STD_LOGIC_VECTOR(4 downto 0);
+   signal funct3 : STD_LOGIC_VECTOR(2 downto 0);
+   signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
+   
+   signal lui, jal, jalr, branch, stor, load, arith_imm, arith_reg : STD_LOGIC;
+   signal I_type, S_type, SB_type : STD_LOGIC;
+   signal do_jump : STD_LOGIC;
+   
+   signal load_2nd_cycle, stall_l : STD_LOGIC := '0';
+   
+   signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
+   signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
+   signal U_imm, UJ_imm : STD_LOGIC_VECTOR(19 downto 0);
 
    COMPONENT prog_mem
       PORT (
@@ -42,7 +59,8 @@ architecture Synthesizable of cpu is
          rs1 : IN std_logic_vector(4 downto 0);
          rs2 : IN std_logic_vector(4 downto 0);          
          s1 : OUT std_logic_vector(31 downto 0);
-         s2 : OUT std_logic_vector(31 downto 0)
+         s2 : OUT std_logic_vector(31 downto 0);
+         reg_peek : out std_logic_vector(15 downto 0)
       );
    END COMPONENT;
 
@@ -50,8 +68,9 @@ architecture Synthesizable of cpu is
       PORT(
          x_in : IN std_logic_vector(31 downto 0);
          y_in : IN std_logic_vector(31 downto 0);
-         opcode5 : IN std_logic;
+         opcode : IN std_logic_vector(6 downto 0);
          funct3 : IN std_logic_vector(2 downto 0);
+         shamt : IN std_logic_vector(4 downto 0);
          funct7 : IN std_logic_vector(6 downto 0);          
          output : OUT std_logic_vector(31 downto 0)
       );
@@ -73,6 +92,8 @@ begin
    rs1 <= inst(19 downto 15);
    rs2 <= inst(24 downto 20);
    rd <= inst(11 downto 7);
+   
+   shamt <= inst(24 downto 20);
    
    funct3 <= inst(14 downto 12);
    funct7 <= inst(31 downto 25);
@@ -99,18 +120,18 @@ begin
    -- ALU operand selection
    x <= s1;
    
-   y <= I_imm  when I_type = '1'  else
-        S_imm  when S_type = '1' else
-        SB_imm when SB_type = '1'  else
+   y <= resize(I_imm, 16)  when I_type = '1'  else
+        resize(S_imm, 16)  when S_type = '1' else
+        resize(SB_imm, 16) when SB_type = '1'  else
         s2;
         
    alu_output_true <= alu_out(0);
 
 
    -- Register file   
-   rf_data_in <= x"00000" & pc when jal = '1' else
-                 U_imm & x"000" when lui = 1' else
-                 data_mem_out when load = '1' else
+   rf_data_in <= x"00000" & pc   when jal = '1'  else
+                 U_imm & x"000"  when lui = '1'   else
+                 data_mem_out    when load = '1' else
                  alu_out;
                  
    rf_we <= (load and load_2nd_cycle)
@@ -122,8 +143,11 @@ begin
 
    -- PC calculation
    do_jump <= jump or (branch and alu_output_true);
-   jmp_or_branch_addr <= SIGNED(pc) + SIGNED(SB_imm) when branch = '1' else
-                         
+   jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length))
+                           when branch = '1' else
+                         STD_LOGIC_VECTOR(signed(pc) + resize(SIGNED(UJ_imm), pc'length))
+                           when jal = '1' else
+                         STD_LOGIC_VECTOR(SIGNED(s1) + resize(SIGNED(I_imm), pc'length));
 
    Inst_prog_mem : prog_mem PORT MAP (
       clka => clk,
@@ -147,7 +171,8 @@ begin
 		rs1 => rs1,
 		rs2 => rs2,
 		s1 => s1,
-		s2 => s2
+		s2 => s2,
+      reg_peek => reg_peek
 	);
    
    Inst_alu: alu PORT MAP(
@@ -155,6 +180,7 @@ begin
 		y_in => y,
 		opcode => opcode,
 		funct3 => funct3,
+      shamt => shamt,
 		funct7 => funct7,
 		output => alu_out
 	);
@@ -162,13 +188,13 @@ begin
    process(clk)
       begin
          if rising_edge(clk) then
-            if jump_or_branch = '1' and stall_l = '1' then
+            if do_jump = '1' and stall_l = '1' then
                stall_l <= '0';
                pc <= jmp_or_branch_addr;
             elsif load = '1' and load_2nd_cycle = '0' then
                load_2nd_cycle <= '1';
             else
-               pc <= pc + 1;
+               pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 1);
                stall_l <= '1';
                load_2nd_cycle <= '0';
             end if;
