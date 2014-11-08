@@ -4,16 +4,17 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity cpu is
     Port ( clk : in  STD_LOGIC;
-           reg_peek : out  STD_LOGIC_VECTOR (16 downto 0));
+           reg_peek : out  STD_LOGIC_VECTOR (15 downto 0));
 end cpu;
 
 architecture Synthesizable of cpu is
 
    signal inst : STD_LOGIC_VECTOR(31 downto 0);
-   signal pc, jump_or_branch_addr : STD_LOGIC_VECTOR(12 downto 0);
+   signal pc, jmp_or_branch_addr : STD_LOGIC_VECTOR(12 downto 0);
    
    signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
    signal x, y : STD_LOGIC_VECTOR(31 downto 0);
+   signal rf_data_in, alu_out, data_mem_out : STD_LOGIC_VECTOR(31 downto 0);
    
    signal rs1, rs2, rd : STD_LOGIC_VECTOR(4 downto 0);
    
@@ -22,7 +23,8 @@ architecture Synthesizable of cpu is
    signal funct3 : STD_LOGIC_VECTOR(2 downto 0);
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
-   signal lui, jal, jalr, branch, stor, load, arith_imm, arith_reg : STD_LOGIC;
+   signal lui, jal, jalr, branch, load, arith_imm, arith_reg : STD_LOGIC;
+   signal stor : STD_LOGIC_VECTOR(0 downto 0);
    signal I_type, S_type, SB_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
@@ -31,6 +33,8 @@ architecture Synthesizable of cpu is
    signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
    signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
    signal U_imm, UJ_imm : STD_LOGIC_VECTOR(19 downto 0);
+   
+   signal alu_output_true, rf_we, arith : STD_LOGIC;
 
    COMPONENT prog_mem
       PORT (
@@ -102,36 +106,35 @@ begin
    jal <= BOOL_TO_SL(opcode = "1101111");
    jalr <= BOOL_TO_SL(opcode = "1100111");
    branch <= BOOL_TO_SL(opcode = "1100011");
-   stor <= BOOL_TO_SL(opcode = "0000011");
+   stor(0) <= BOOL_TO_SL(opcode = "0000011");
    load <= BOOL_TO_SL(opcode = "0100011");
    arith_imm <= BOOL_TO_SL(opcode = "0010011");
    arith_reg <= BOOL_TO_SL(opcode = "0110011");
    
    I_type <= arith_imm;
    
-   
    -- Immediates
    I_imm <= inst(31 downto 20);
    S_imm <= inst(31 downto 25) & inst(11 downto 7);
-   SB_imm <= inst(31) & inst(7) & inst(30 downto 25) & inst(11 downto 8);
+   SB_imm <= inst(31) & inst(7) & inst(30 downto 25) & inst(11 downto 8) & "0";
    U_imm <= inst(31 downto 12);
    UJ_imm <= inst(31) & inst(19 downto 12) & inst(20) & inst(30 downto 21);
 
    -- ALU operand selection
    x <= s1;
    
-   y <= resize(I_imm, 16)  when I_type = '1'  else
-        resize(S_imm, 16)  when S_type = '1' else
-        resize(SB_imm, 16) when SB_type = '1'  else
+   y <= STD_LOGIC_VECTOR(resize(SIGNED(I_imm), 32))  when I_type = '1'  else
+        STD_LOGIC_VECTOR(resize(SIGNED(S_imm), 32))  when S_type = '1' else
+        STD_LOGIC_VECTOR(resize(SIGNED(SB_imm), 32)) when SB_type = '1'  else
         s2;
         
    alu_output_true <= alu_out(0);
 
 
    -- Register file   
-   rf_data_in <= x"00000" & pc   when jal = '1'  else
-                 U_imm & x"000"  when lui = '1'   else
-                 data_mem_out    when load = '1' else
+   rf_data_in <= STD_LOGIC_VECTOR(resize(UNSIGNED(pc), rf_data_in'length)) when jal = '1'  else
+                 U_imm & x"000"                                            when lui = '1'   else
+                 data_mem_out                                              when load = '1' else
                  alu_out;
                  
    rf_we <= (load and load_2nd_cycle)
@@ -142,12 +145,12 @@ begin
 
 
    -- PC calculation
-   do_jump <= jump or (branch and alu_output_true);
+   do_jump <= jal or jalr or (branch and alu_output_true);
    jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length))
                            when branch = '1' else
                          STD_LOGIC_VECTOR(signed(pc) + resize(SIGNED(UJ_imm), pc'length))
                            when jal = '1' else
-                         STD_LOGIC_VECTOR(SIGNED(s1) + resize(SIGNED(I_imm), pc'length));
+                         STD_LOGIC_VECTOR(resize(SIGNED(s1), pc'length) + resize(SIGNED(I_imm), pc'length));
 
    Inst_prog_mem : prog_mem PORT MAP (
       clka => clk,
@@ -158,7 +161,7 @@ begin
    Inst_data_mem : data_mem PORT MAP (
       clka => clk,
       wea => stor,
-      addra => alu_out,
+      addra => alu_out(12 downto 0),
       dina => s2,
       douta => data_mem_out
    );

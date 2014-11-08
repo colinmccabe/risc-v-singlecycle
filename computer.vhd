@@ -10,6 +10,14 @@ end computer;
 architecture Behavioral of computer is
 
    signal div : STD_LOGIC_VECTOR(12 downto 0);
+   signal seg_num : STD_LOGIC_VECTOR(15 downto 0);
+   
+   COMPONENT cpu
+      PORT(
+         clk : IN std_logic;          
+         reg_peek : OUT std_logic_vector(15 downto 0)
+      );
+   END COMPONENT;
 
    COMPONENT sevenseg
       PORT(
@@ -22,12 +30,16 @@ architecture Behavioral of computer is
    
 begin
 
+   Inst_cpu: cpu PORT MAP(
+      clk => clk,
+      reg_peek => seg_num
+   );
+
    Inst_sevenseg: sevenseg PORT MAP(
-		num => ,
-		anodes => ,
-		cathodes => ,
-		clk => div(12);
+		num => seg_num,
+		anodes => an,
+		cathodes => seg,
+		clk => div(12)
 	);
 
 end Behavioral;
-
