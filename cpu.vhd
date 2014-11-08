@@ -76,7 +76,7 @@ architecture Synthesizable of cpu is
          y_in : IN std_logic_vector(31 downto 0);
          opcode : IN std_logic_vector(6 downto 0);
          funct3 : IN std_logic_vector(2 downto 0);
-         shamt : IN std_logic_vector(4 downto 0);
+         shamti : IN std_logic_vector(4 downto 0);
          funct7 : IN std_logic_vector(6 downto 0);          
          output : OUT std_logic_vector(31 downto 0)
       );
@@ -128,8 +128,8 @@ begin
    x <= s1;
    
    y <= STD_LOGIC_VECTOR(resize(SIGNED(I_imm), 32))  when I_type = '1'  else
-        STD_LOGIC_VECTOR(resize(SIGNED(S_imm), 32))  when S_type = '1' else
-        STD_LOGIC_VECTOR(resize(SIGNED(SB_imm), 32)) when SB_type = '1'  else
+        STD_LOGIC_VECTOR(resize(SIGNED(S_imm), 32))  when S_type = '1'  else
+        STD_LOGIC_VECTOR(resize(SIGNED(SB_imm), 32)) when SB_type = '1' else
         s2;
         
    alu_output_true <= alu_out(0);
@@ -187,7 +187,7 @@ begin
 		y_in => y,
 		opcode => opcode,
 		funct3 => funct3,
-      shamt => shamt,
+      shamti => shamt,
 		funct7 => funct7,
 		output => alu_out
 	);
