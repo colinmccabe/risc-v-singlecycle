@@ -10,7 +10,8 @@ end cpu;
 architecture Synthesizable of cpu is
 
    signal inst : STD_LOGIC_VECTOR(31 downto 0);
-   signal pc, jmp_or_branch_addr : STD_LOGIC_VECTOR(12 downto 0);
+   signal pc : STD_LOGIC_VECTOR(12 downto 0) := (others => '0');
+   signal jmp_or_branch_addr : STD_LOGIC_VECTOR(12 downto 0);
    
    signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
    signal x, y : STD_LOGIC_VECTOR(31 downto 0);
@@ -31,10 +32,11 @@ architecture Synthesizable of cpu is
    signal load_2nd_cycle, stall_l : STD_LOGIC := '0';
    
    signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
-   signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
-   signal U_imm, UJ_imm : STD_LOGIC_VECTOR(19 downto 0);
+   signal SB_imm : STD_LOGIC_VECTOR(11 downto 0);
+   signal U_imm : STD_LOGIC_VECTOR(19 downto 0);
+   signal UJ_imm : STD_LOGIC_VECTOR(19 downto 0);
    
-   signal alu_output_true, rf_we, arith : STD_LOGIC;
+   signal alu_output_true, rf_we : STD_LOGIC;
 
    COMPONENT prog_mem
       PORT (
@@ -102,21 +104,23 @@ begin
    funct3 <= inst(14 downto 12);
    funct7 <= inst(31 downto 25);
    
-   lui <= BOOL_TO_SL(opcode = "0110111");
-   jal <= BOOL_TO_SL(opcode = "1101111");
-   jalr <= BOOL_TO_SL(opcode = "1100111");
-   branch <= BOOL_TO_SL(opcode = "1100011");
-   stor(0) <= BOOL_TO_SL(opcode = "0000011");
-   load <= BOOL_TO_SL(opcode = "0100011");
+   lui <=       BOOL_TO_SL(opcode = "0110111");
+   jal <=       BOOL_TO_SL(opcode = "1101111");
+   jalr <=      BOOL_TO_SL(opcode = "1100111");
+   branch <=    BOOL_TO_SL(opcode = "1100011");
+   stor(0) <=   BOOL_TO_SL(opcode = "0000011");
+   load <=      BOOL_TO_SL(opcode = "0100011");
    arith_imm <= BOOL_TO_SL(opcode = "0010011");
    arith_reg <= BOOL_TO_SL(opcode = "0110011");
    
    I_type <= arith_imm;
+   S_type <= load;
+   SB_type <= branch;
    
    -- Immediates
    I_imm <= inst(31 downto 20);
    S_imm <= inst(31 downto 25) & inst(11 downto 7);
-   SB_imm <= inst(31) & inst(7) & inst(30 downto 25) & inst(11 downto 8) & "0";
+   SB_imm <= inst(31) & inst(7) & inst(30 downto 25) & inst(11 downto 8);
    U_imm <= inst(31 downto 12);
    UJ_imm <= inst(31) & inst(19 downto 12) & inst(20) & inst(30 downto 21);
 
@@ -138,7 +142,7 @@ begin
                  alu_out;
                  
    rf_we <= (load and load_2nd_cycle)
-               or arith
+               or arith_imm or arith_reg
                or jal
                or jalr
                or lui;
@@ -146,11 +150,11 @@ begin
 
    -- PC calculation
    do_jump <= jal or jalr or (branch and alu_output_true);
-   jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length))
+   jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm(11 downto 1)), pc'length))
                            when branch = '1' else
-                         STD_LOGIC_VECTOR(signed(pc) + resize(SIGNED(UJ_imm), pc'length))
+                         STD_LOGIC_VECTOR(signed(pc) + resize(SIGNED(UJ_imm(19 downto 1)), pc'length))
                            when jal = '1' else
-                         STD_LOGIC_VECTOR(resize(SIGNED(s1), pc'length) + resize(SIGNED(I_imm), pc'length));
+                         STD_LOGIC_VECTOR(resize(SIGNED(s1), pc'length) + resize(SIGNED(I_imm(11 downto 2)), pc'length));
 
    Inst_prog_mem : prog_mem PORT MAP (
       clka => clk,

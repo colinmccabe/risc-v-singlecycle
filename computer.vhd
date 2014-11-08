@@ -1,5 +1,6 @@
 library IEEE;
 use IEEE.STD_LOGIC_1164.ALL;
+use IEEE.NUMERIC_STD.ALL;
 
 entity computer is
     Port ( clk : in  STD_LOGIC;
@@ -9,7 +10,7 @@ end computer;
 
 architecture Behavioral of computer is
 
-   signal div : STD_LOGIC_VECTOR(12 downto 0);
+   signal div : STD_LOGIC_VECTOR(12 downto 0) := (others => '0');
    signal seg_num : STD_LOGIC_VECTOR(15 downto 0);
    
    COMPONENT cpu
@@ -41,5 +42,12 @@ begin
 		cathodes => seg,
 		clk => div(12)
 	);
+   
+   process(clk)
+      begin
+         if rising_edge(clk) then
+            div <= STD_LOGIC_VECTOR(UNSIGNED(div) + 1);
+         end if;
+      end process;
 
 end Behavioral;

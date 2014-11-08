@@ -91,7 +91,7 @@ begin
             reg_file(30) when "11110",
             reg_file(31) when others;
 
-   process(clk)
+   process(clk, we)
       begin
          if rising_edge(clk) and we = '1' then
             if rd = "00001" then
