@@ -24,8 +24,8 @@ architecture Synthesizable of cpu is
    signal funct3 : STD_LOGIC_VECTOR(2 downto 0);
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
-   signal lui, jal, jalr, branch, load, arith_imm, arith_reg, prog_mem_en, auipc : STD_LOGIC;
-   signal stor : STD_LOGIC_VECTOR(0 downto 0);
+   signal lui, jal, jalr, branch, load, arith_imm, arith_reg, prog_mem_en, auipc, stor : STD_LOGIC;
+   signal data_mem_we : STD_LOGIC_VECTOR(0 downto 0);
    signal I_type, S_type, SB_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
@@ -110,13 +110,13 @@ begin
    jal <=       BOOL_TO_SL(opcode = "1101111");
    jalr <=      BOOL_TO_SL(opcode = "1100111");
    branch <=    BOOL_TO_SL(opcode = "1100011");
-   stor(0) <=   BOOL_TO_SL(opcode = "0100011");
+   stor <=   BOOL_TO_SL(opcode = "0100011");
    load <=      BOOL_TO_SL(opcode = "0000011");
    arith_imm <= BOOL_TO_SL(opcode = "0010011");
    arith_reg <= BOOL_TO_SL(opcode = "0110011");
    
-   I_type <= arith_imm or load;
-   S_type <= stor(0);
+   I_type <= arith_imm or load or jalr;
+   S_type <= stor;
    SB_type <= branch;
    
    -- Immediates
@@ -144,12 +144,12 @@ begin
                                                             when auipc = '1' else                                         
                  alu_out;
                  
-   rf_we <= (load and load_2nd_cycle)
-               or arith_imm or arith_reg
-               or jal
-               or jalr
-               or lui
-               or auipc;
+   rf_we <= stall_l and ((load and load_2nd_cycle)
+                           or arith_imm or arith_reg
+                           or jal
+                           or jalr
+                           or lui
+                           or auipc);
 
 
    -- PC calculation
@@ -159,8 +159,9 @@ begin
                          STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length))
                            when jal = '1' else
                          alu_out(14 downto 0); -- JALR
-                         --STD_LOGIC_VECTOR(resize(SIGNED(s1), pc'length) + resize(SIGNED(I_imm(11 downto 2)), pc'length));
-                         
+
+   -- Memory
+   data_mem_we(0) <= stor and stall_l;
    prog_mem_en <= not (load and (not load_2nd_cycle));
 
    Inst_prog_mem : prog_mem PORT MAP (
@@ -172,7 +173,7 @@ begin
   
    Inst_data_mem : data_mem PORT MAP (
       clka => clk,
-      wea => stor,
+      wea => data_mem_we,
       addra => alu_out(14 downto 2),
       dina => s2,
       douta => data_mem_out
