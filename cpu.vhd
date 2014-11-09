@@ -24,7 +24,8 @@ architecture Synthesizable of cpu is
    signal funct3 : STD_LOGIC_VECTOR(2 downto 0);
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
-   signal lui, jal, jalr, branch, load, arith_imm, arith_reg, prog_mem_en, auipc, stor : STD_LOGIC;
+   signal lui, jal, jalr, branch, load, arith_imm, arith_reg,
+            prog_mem_en, auipc, stor, comparison_true, eq : STD_LOGIC;
    signal data_mem_we : STD_LOGIC_VECTOR(0 downto 0);
    signal I_type, S_type, SB_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
@@ -151,8 +152,18 @@ begin
 
 
    -- PC calculation
-   alu_output_true <= alu_out(0);
-   do_jump <= jal or jalr or (branch and alu_output_true);
+   eq <= BOOL_TO_SL(x = y);
+   
+   comparison_true <= BOOL_TO_SL(
+                                 (eq = '1' and funct3 = "000") -- beq
+                                   or
+                                 (eq = '0' and funct3 = "001") -- bne
+                                   or
+                                 (alu_out(0) = '1' and (funct3 = "100" or funct3 = "110")) -- blt/bltu
+                                   or
+                                 ((alu_out(0) = '1' or eq = '1') and (funct3 = "101" or funct3 = "111")) --bge/bgeu
+                                );
+   do_jump <= jal or jalr or (branch and comparison_true);
    
    jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length) - 4)
                            when branch = '1' else

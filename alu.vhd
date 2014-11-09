@@ -58,10 +58,11 @@ begin
    output <= bshift_out when (funct3 = "001" or funct3 = "101") and (opcode = "0010011" or opcode = "0110011") else 
              (0 => BOOL_TO_SL(x < y), others => '0') when (funct3 = "010" and (opcode = "0010011" or opcode = "0110011")) -- slt, slti
                                                             or
-                                                          (funct3 = "100" and opcode = "1100011") else
+                                                          ((not funct3 = "110") and (not funct3 = "111") and opcode = "1100011") -- br signed
+                                                          else
              (0 => BOOL_TO_SL(x_in < y_in), others => '0') when (funct3 = "011" and (opcode = "0010011" or opcode = "0110011"))
                                                                   or
-                                                                (funct3 = "110" and opcode = "1100011") else
+                                                                ((funct3 = "110" or funct3 = "111") and opcode = "1100011") else
              STD_LOGIC_VECTOR(output_signed);
    
    -- Bit shifter
