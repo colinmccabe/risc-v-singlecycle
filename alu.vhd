@@ -29,6 +29,15 @@ architecture Synthesizable of alu is
          output : OUT std_logic_vector(31 downto 0)
       );
    END COMPONENT;
+   
+   function BOOL_TO_SL(X : boolean) return std_ulogic is
+      begin
+         if X then
+            return '1';
+         else
+            return '0';
+         end if;
+      end BOOL_TO_SL;
 
 begin
    x <= SIGNED(x_in);
@@ -37,7 +46,7 @@ begin
    true_val <= (0 => '1', others => '0');
 
    output_signed <=
-      x - y       when funct3 = "000" and opcode(5) = '1' and funct7(5) = '1' else
+      x - y       when funct3 = "000" and opcode = "0110011" and funct7(5) = '1' else
       x + y       when funct3 = "000" or opcode = "0000011"     -- load
                                           or opcode = "0100011"  -- stor
                                           or opcode = "1100111" -- jalr
@@ -47,8 +56,12 @@ begin
       x and y;
              
    output <= bshift_out when (funct3 = "001" or funct3 = "101") and (opcode = "0010011" or opcode = "0110011") else 
-             true_val    when funct3 = "010" and x < y else
-             true_val    when funct3 = "011" and x_in < y_in else
+             (0 => BOOL_TO_SL(x < y), others => '0') when (funct3 = "010" and (opcode = "0010011" or opcode = "0110011")) -- slt, slti
+                                                            or
+                                                          (funct3 = "100" and opcode = "1100011") else
+             (0 => BOOL_TO_SL(x_in < y_in), others => '0') when (funct3 = "011" and (opcode = "0010011" or opcode = "0110011"))
+                                                                  or
+                                                                (funct3 = "110" and opcode = "1100011") else
              STD_LOGIC_VECTOR(output_signed);
    
    -- Bit shifter

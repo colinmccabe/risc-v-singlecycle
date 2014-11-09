@@ -132,8 +132,6 @@ begin
    y <= STD_LOGIC_VECTOR(resize(SIGNED(I_imm), 32))  when I_type = '1'  else
         STD_LOGIC_VECTOR(resize(SIGNED(S_imm), 32))  when S_type = '1'  else
         s2;
-        
-   alu_output_true <= alu_out(0);
 
 
    -- Register file   
@@ -153,7 +151,9 @@ begin
 
 
    -- PC calculation
+   alu_output_true <= alu_out(0);
    do_jump <= jal or jalr or (branch and alu_output_true);
+   
    jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length) - 4)
                            when branch = '1' else
                          STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length) - 4)
@@ -207,7 +207,7 @@ begin
             if do_jump = '1' and stall_l = '1' then
                stall_l <= '0';
                pc <= jmp_or_branch_addr;
-            elsif load = '1' and load_2nd_cycle = '0' then
+            elsif load = '1' and load_2nd_cycle = '0' and stall_l = '1' then
                load_2nd_cycle <= '1';
             else
                pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 4);
