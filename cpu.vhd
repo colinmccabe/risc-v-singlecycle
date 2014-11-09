@@ -154,9 +154,9 @@ begin
 
    -- PC calculation
    do_jump <= jal or jalr or (branch and alu_output_true);
-   jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length))
+   jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length) - 4)
                            when branch = '1' else
-                         STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length))
+                         STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length) - 4)
                            when jal = '1' else
                          alu_out(14 downto 0); -- JALR
 
