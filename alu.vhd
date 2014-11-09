@@ -38,7 +38,7 @@ begin
 
    output_signed <=
       x - y       when funct3 = "000" and opcode(5) = '1' and funct7(5) = '1' else
-      x + y       when funct3 = "000" else
+      x + y       when funct3 = "000" or (opcode = "0000011" or opcode = "0100011") else
       x xor y     when funct3 = "100" else
       x or y      when funct3 = "110" else
       x and y;

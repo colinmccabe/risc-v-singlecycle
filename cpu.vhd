@@ -10,8 +10,8 @@ end cpu;
 architecture Synthesizable of cpu is
 
    signal inst : STD_LOGIC_VECTOR(31 downto 0);
-   signal pc : STD_LOGIC_VECTOR(12 downto 0) := (others => '0');
-   signal jmp_or_branch_addr : STD_LOGIC_VECTOR(12 downto 0);
+   signal pc : STD_LOGIC_VECTOR(14 downto 0) := (others => '0');
+   signal jmp_or_branch_addr : STD_LOGIC_VECTOR(14 downto 0);
    
    signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
    signal x, y : STD_LOGIC_VECTOR(31 downto 0);
@@ -24,7 +24,7 @@ architecture Synthesizable of cpu is
    signal funct3 : STD_LOGIC_VECTOR(2 downto 0);
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
-   signal lui, jal, jalr, branch, load, arith_imm, arith_reg : STD_LOGIC;
+   signal lui, jal, jalr, branch, load, arith_imm, arith_reg, prog_mem_en, auipc : STD_LOGIC;
    signal stor : STD_LOGIC_VECTOR(0 downto 0);
    signal I_type, S_type, SB_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
@@ -32,15 +32,16 @@ architecture Synthesizable of cpu is
    signal load_2nd_cycle, stall_l : STD_LOGIC := '0';
    
    signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
-   signal SB_imm : STD_LOGIC_VECTOR(11 downto 0);
-   signal U_imm : STD_LOGIC_VECTOR(19 downto 0);
-   signal UJ_imm : STD_LOGIC_VECTOR(19 downto 0);
+   signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
+   signal U_imm : STD_LOGIC_VECTOR(31 downto 0);
+   signal UJ_imm : STD_LOGIC_VECTOR(20 downto 0);
    
    signal alu_output_true, rf_we : STD_LOGIC;
 
    COMPONENT prog_mem
       PORT (
          clka : IN STD_LOGIC;
+         ena : IN STD_LOGIC;
          addra : IN STD_LOGIC_VECTOR(12 DOWNTO 0);
          douta : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
       );
@@ -105,67 +106,74 @@ begin
    funct7 <= inst(31 downto 25);
    
    lui <=       BOOL_TO_SL(opcode = "0110111");
+   auipc <=     BOOL_TO_SL(opcode = "0010111");
    jal <=       BOOL_TO_SL(opcode = "1101111");
    jalr <=      BOOL_TO_SL(opcode = "1100111");
    branch <=    BOOL_TO_SL(opcode = "1100011");
-   stor(0) <=   BOOL_TO_SL(opcode = "0000011");
-   load <=      BOOL_TO_SL(opcode = "0100011");
+   stor(0) <=   BOOL_TO_SL(opcode = "0100011");
+   load <=      BOOL_TO_SL(opcode = "0000011");
    arith_imm <= BOOL_TO_SL(opcode = "0010011");
    arith_reg <= BOOL_TO_SL(opcode = "0110011");
    
-   I_type <= arith_imm;
-   S_type <= load;
+   I_type <= arith_imm or load;
+   S_type <= stor(0);
    SB_type <= branch;
    
    -- Immediates
    I_imm <= inst(31 downto 20);
    S_imm <= inst(31 downto 25) & inst(11 downto 7);
-   SB_imm <= inst(31) & inst(7) & inst(30 downto 25) & inst(11 downto 8);
-   U_imm <= inst(31 downto 12);
-   UJ_imm <= inst(31) & inst(19 downto 12) & inst(20) & inst(30 downto 21);
+   SB_imm <= inst(31) & inst(7) & inst(30 downto 25) & inst(11 downto 8) & "0";
+   U_imm <= inst(31 downto 12) & x"000";
+   UJ_imm <= inst(31) & inst(19 downto 12) & inst(20) & inst(30 downto 21) & "0";
 
    -- ALU operand selection
    x <= s1;
    
    y <= STD_LOGIC_VECTOR(resize(SIGNED(I_imm), 32))  when I_type = '1'  else
         STD_LOGIC_VECTOR(resize(SIGNED(S_imm), 32))  when S_type = '1'  else
-        STD_LOGIC_VECTOR(resize(SIGNED(SB_imm), 32)) when SB_type = '1' else
         s2;
         
    alu_output_true <= alu_out(0);
 
 
    -- Register file   
-   rf_data_in <= STD_LOGIC_VECTOR(resize(UNSIGNED(pc), rf_data_in'length)) when jal = '1'  else
-                 U_imm & x"000"                                            when lui = '1'   else
-                 data_mem_out                                              when load = '1' else
+   rf_data_in <= STD_LOGIC_VECTOR(resize(UNSIGNED(pc), 32)) when jal = '1' or jalr = '1' else
+                 U_imm                                      when lui = '1'   else
+                 data_mem_out                               when load = '1' else
+                 STD_LOGIC_VECTOR(resize(UNSIGNED(SIGNED(pc) + resize(SIGNED(U_imm), pc'length)), 32))
+                                                            when auipc = '1' else                                         
                  alu_out;
                  
    rf_we <= (load and load_2nd_cycle)
                or arith_imm or arith_reg
                or jal
                or jalr
-               or lui;
+               or lui
+               or auipc;
 
 
    -- PC calculation
    do_jump <= jal or jalr or (branch and alu_output_true);
-   jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm(11 downto 1)), pc'length))
+   jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length))
                            when branch = '1' else
-                         STD_LOGIC_VECTOR(signed(pc) + resize(SIGNED(UJ_imm(19 downto 1)), pc'length))
+                         STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length))
                            when jal = '1' else
-                         STD_LOGIC_VECTOR(resize(SIGNED(s1), pc'length) + resize(SIGNED(I_imm(11 downto 2)), pc'length));
+                         alu_out(14 downto 0); -- JALR
+                         --STD_LOGIC_VECTOR(resize(SIGNED(s1), pc'length) + resize(SIGNED(I_imm(11 downto 2)), pc'length));
+                         
+   prog_mem_en <= not (load and (not load_2nd_cycle));
 
    Inst_prog_mem : prog_mem PORT MAP (
       clka => clk,
-      addra => pc,
+      ena => prog_mem_en,
+      addra => pc(14 downto 2),
       douta => inst
    );
   
    Inst_data_mem : data_mem PORT MAP (
       clka => clk,
       wea => stor,
-      addra => alu_out(12 downto 0),
+      addra => alu_out(14 downto 2),
       dina => s2,
       douta => data_mem_out
    );
@@ -201,7 +209,7 @@ begin
             elsif load = '1' and load_2nd_cycle = '0' then
                load_2nd_cycle <= '1';
             else
-               pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 1);
+               pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 4);
                stall_l <= '1';
                load_2nd_cycle <= '0';
             end if;
