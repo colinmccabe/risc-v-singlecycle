@@ -111,7 +111,7 @@ begin
    jal <=       BOOL_TO_SL(opcode = "1101111");
    jalr <=      BOOL_TO_SL(opcode = "1100111");
    branch <=    BOOL_TO_SL(opcode = "1100011");
-   stor <=   BOOL_TO_SL(opcode = "0100011");
+   stor <=      BOOL_TO_SL(opcode = "0100011");
    load <=      BOOL_TO_SL(opcode = "0000011");
    arith_imm <= BOOL_TO_SL(opcode = "0010011");
    arith_reg <= BOOL_TO_SL(opcode = "0110011");
@@ -161,7 +161,7 @@ begin
                                    or
                                  (alu_out(0) = '1' and (funct3 = "100" or funct3 = "110")) -- blt/bltu
                                    or
-                                 ((alu_out(0) = '1' or eq = '1') and (funct3 = "101" or funct3 = "111")) --bge/bgeu
+                                 ((alu_out(0) = '0' or eq = '1') and (funct3 = "101" or funct3 = "111")) --bge/bgeu
                                 );
    do_jump <= jal or jalr or (branch and comparison_true);
    
@@ -169,7 +169,7 @@ begin
                            when branch = '1' else
                          STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length) - 4)
                            when jal = '1' else
-                         alu_out(14 downto 0); -- JALR
+                         alu_out(14 downto 0); -- jalr
 
    -- Memory
    data_mem_we(0) <= stor and stall_l;
