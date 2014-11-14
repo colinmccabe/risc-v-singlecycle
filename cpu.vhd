@@ -11,11 +11,14 @@ architecture Synthesizable of cpu is
 
    signal inst : STD_LOGIC_VECTOR(31 downto 0);
    signal pc : STD_LOGIC_VECTOR(14 downto 0) := (others => '0');
-   signal jmp_or_branch_addr : STD_LOGIC_VECTOR(14 downto 0);
+   signal jmp_or_branch_addr, data_addr : STD_LOGIC_VECTOR(14 downto 0);
    
    signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
    signal x, y : STD_LOGIC_VECTOR(31 downto 0);
-   signal rf_data_in, alu_out, data_mem_out : STD_LOGIC_VECTOR(31 downto 0);
+   signal rf_data_in, alu_out, load_data_word, load_data, stor_data,
+          stor_src_reg, stor_data_byte, stor_data_hw : STD_LOGIC_VECTOR(31 downto 0);
+   signal load_data_hw, hw_to_stor : STD_LOGIC_VECTOR(15 downto 0);
+   signal load_data_byte, byte_to_stor : STD_LOGIC_VECTOR(7 downto 0);
    
    signal rs1, rs2, rd : STD_LOGIC_VECTOR(4 downto 0);
    
@@ -94,7 +97,7 @@ architecture Synthesizable of cpu is
       end BOOL_TO_SL;
 
 begin
-   -- Instruction-derived control signals
+   -- Control signals
    opcode <= inst(6 downto 0);
    
    rs1 <= inst(19 downto 15);
@@ -119,13 +122,15 @@ begin
    I_type <= arith_imm or load or jalr;
    S_type <= stor;
    SB_type <= branch;
-   
+
+
    -- Immediates
    I_imm <= inst(31 downto 20);
    S_imm <= inst(31 downto 25) & inst(11 downto 7);
    SB_imm <= inst(31) & inst(7) & inst(30 downto 25) & inst(11 downto 8) & "0";
    U_imm <= inst(31 downto 12) & x"000";
    UJ_imm <= inst(31) & inst(19 downto 12) & inst(20) & inst(30 downto 21) & "0";
+
 
    -- ALU operand selection
    x <= s1;
@@ -138,7 +143,7 @@ begin
    -- Register file   
    rf_data_in <= STD_LOGIC_VECTOR(resize(UNSIGNED(pc), 32)) when jal = '1' or jalr = '1' else
                  U_imm                                      when lui = '1'   else
-                 data_mem_out                               when load = '1' else
+                 load_data                               when load = '1' else
                  STD_LOGIC_VECTOR(resize(UNSIGNED(SIGNED(pc) + resize(SIGNED(U_imm), pc'length)), 32))
                                                             when auipc = '1' else                                         
                  alu_out;
@@ -171,9 +176,50 @@ begin
                            when jal = '1' else
                          alu_out(14 downto 0); -- jalr
 
-   -- Memory
+
+   -- Memory control
    data_mem_we(0) <= stor and stall_l;
    prog_mem_en <= not (load and (not load_2nd_cycle));
+   data_addr <= alu_out(14 downto 0);
+   stor_src_reg <= s2;
+
+   -- Memory load
+   with funct3 select
+      load_data <= STD_LOGIC_VECTOR(resize(SIGNED(load_data_byte), 32)) when "000",
+                   STD_LOGIC_VECTOR(resize(SIGNED(load_data_hw), 32)) when "001",
+                   STD_LOGIC_VECTOR(resize(UNSIGNED(load_data_byte), 32)) when "100",
+                   STD_LOGIC_VECTOR(resize(UNSIGNED(load_data_hw), 32)) when "101",
+                   load_data_word when others;
+
+   with data_addr(1 downto 0) select
+      load_data_byte <= load_data_word(7 downto 0) when "00",
+                        load_data_word(15 downto 8) when "01",
+                        load_data_word(23 downto 16) when "10",
+                        load_data_word(31 downto 24) when others;
+
+   with data_addr(1) select
+      load_data_hw <= load_data_word(15 downto 0) when '0',
+                      load_data_word(31 downto 16) when others;
+
+   -- Memory stor
+   byte_to_stor <= stor_src_reg(31) & stor_src_reg(6 downto 0);
+   hw_to_stor <= stor_src_reg(31) & stor_src_reg(14 downto 0);
+
+   with data_addr(1 downto 0) select
+      stor_data_byte <= load_data_word(31 downto 8) & byte_to_stor when "00",
+                        load_data_word(31 downto 16) & byte_to_stor & load_data_word(7 downto 0) when "01",
+                        load_data_word(31 downto 24) & byte_to_stor & load_data_word(15 downto 0) when "10",
+                        byte_to_stor & load_data_word(23 downto 0) when others;
+
+   with data_addr(0) select
+      stor_data_hw <= load_data_word(31 downto 16) & hw_to_stor when '0',
+                      hw_to_stor & load_data_word(15 downto 0) when others;
+
+   with funct3 select
+      stor_data <= stor_data_byte when "000",
+                   stor_data_hw when "001",
+                   stor_src_reg when others;
+
 
    Inst_prog_mem : prog_mem PORT MAP (
       clka => clk,
@@ -186,8 +232,8 @@ begin
       clka => clk,
       wea => data_mem_we,
       addra => alu_out(14 downto 2),
-      dina => s2,
-      douta => data_mem_out
+      dina => stor_data,
+      douta => load_data_word
    );
    
    Inst_rf: rf PORT MAP(
@@ -218,7 +264,7 @@ begin
             if do_jump = '1' and stall_l = '1' then
                stall_l <= '0';
                pc <= jmp_or_branch_addr;
-            elsif load = '1' and load_2nd_cycle = '0' and stall_l = '1' then
+            elsif (load = '1' or stor = '1') and load_2nd_cycle = '0' and stall_l = '1' then
                load_2nd_cycle <= '1';
             else
                pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 4);
