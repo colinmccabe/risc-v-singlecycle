@@ -179,7 +179,7 @@ begin
 
    -- Memory control
    data_mem_we(0) <= stor and stall_l;
-   prog_mem_en <= not (load and (not load_2nd_cycle));
+   prog_mem_en <= not ((load or stor) and (not load_2nd_cycle));
    data_addr <= alu_out(14 downto 0);
    stor_src_reg <= s2;
 
