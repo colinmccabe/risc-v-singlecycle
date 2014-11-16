@@ -81,13 +81,13 @@ begin
                   or (opcode = "1100011") -- blt, bge
 
       else (x_in xor y_in)
-         when funct3 = "100" and comp_instr = '1'
+         when comp_instr = '1' and funct3 = "100"
 
       else (x_in or y_in)
-         when funct3 = "110" and comp_instr = '1'
+         when comp_instr = '1' and funct3 = "110"
 
       else (x_in and y_in)
-         when funct3 = "111" and comp_instr = '1'
+         when comp_instr = '1' and funct3 = "111"
 
       else STD_LOGIC_VECTOR(output_signed);
              
