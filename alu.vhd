@@ -17,7 +17,7 @@ architecture Synthesizable of alu is
 
    signal x, y, output_signed : SIGNED(31 downto 0);
    signal bshift_out : STD_LOGIC_VECTOR(31 downto 0);
-   signal left, logical : STD_LOGIC;
+   signal left, logical, comp_instr : STD_LOGIC;
    signal shamt : STD_LOGIC_VECTOR(4 downto 0);
 
    COMPONENT bshift
@@ -46,13 +46,7 @@ begin
 
    output_signed <=
       x - y       when funct3 = "000" and opcode = "0110011" and funct7(5) = '1' else
-      x + y       when funct3 = "000" or opcode = "0000011"     -- load
-                                          or opcode = "0100011"  -- stor
-                                          or opcode = "1100111" -- jalr
-                                          else
-      x xor y     when funct3 = "100" else
-      x or y      when funct3 = "110" else
-      x and y;
+      x + y;
      
      
    -- Bit shifter
@@ -72,17 +66,29 @@ begin
    
    
    -- Main ALU output mux
-   output <= bshift_out
-                  when (opcode = "0010011" or opcode = "0110011") and (funct3 = "001" or funct3 = "101") -- shifts
+   comp_instr <= BOOL_TO_SL(opcode = "0010011" or opcode = "0110011");
 
-             else (0 => BOOL_TO_SL(x_in < y_in), others => '0')
-                  when ((opcode = "0010011" or opcode = "0110011") and funct3 = "011") -- sltu, sltiu
-                        or (opcode = "1100011" and (funct3 = "110" or funct3 = "111")) -- bltu, bgeu
+   output <=
+      bshift_out
+         when comp_instr = '1' and (funct3 = "001" or funct3 = "101") -- shifts
 
-             else (0 => BOOL_TO_SL(x < y), others => '0')
-                  when ((opcode = "0010011" or opcode = "0110011") and funct3 = "010") -- slt, slti
-                        or (opcode = "1100011") -- blt, bge
+      else (0 => BOOL_TO_SL(x_in < y_in), others => '0')
+         when (comp_instr = '1' and funct3 = "011") -- sltu, sltiu
+                     or (opcode = "1100011" and (funct3 = "110" or funct3 = "111")) -- bltu, bgeu
 
-             else STD_LOGIC_VECTOR(output_signed);
+      else (0 => BOOL_TO_SL(x < y), others => '0')
+         when (comp_instr = '1' and funct3 = "010") -- slt, slti
+                  or (opcode = "1100011") -- blt, bge
+
+      else (x_in xor y_in)
+         when funct3 = "100" and comp_instr = '1'
+
+      else (x_in or y_in)
+         when funct3 = "110" and comp_instr = '1'
+
+      else (x_in and y_in)
+         when funct3 = "111" and comp_instr = '1'
+
+      else STD_LOGIC_VECTOR(output_signed);
              
 end Synthesizable;

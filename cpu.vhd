@@ -27,10 +27,10 @@ architecture Synthesizable of cpu is
    signal funct3 : STD_LOGIC_VECTOR(2 downto 0);
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
-   signal lui, jal, jalr, branch, load, arith_imm, arith_reg,
+   signal lui, jal, jalr, branch, load, comp_imm, comp_reg,
             prog_mem_en, auipc, stor, comparison_true, eq : STD_LOGIC;
    signal data_mem_we : STD_LOGIC_VECTOR(0 downto 0);
-   signal I_type, S_type, SB_type : STD_LOGIC;
+   signal I_type, IU_type, S_type, SB_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
    signal load_2nd_cycle, stall_l : STD_LOGIC := '0';
@@ -116,10 +116,11 @@ begin
    branch <=    BOOL_TO_SL(opcode = "1100011");
    stor <=      BOOL_TO_SL(opcode = "0100011");
    load <=      BOOL_TO_SL(opcode = "0000011");
-   arith_imm <= BOOL_TO_SL(opcode = "0010011");
-   arith_reg <= BOOL_TO_SL(opcode = "0110011");
+   comp_imm <= BOOL_TO_SL(opcode = "0010011");
+   comp_reg <= BOOL_TO_SL(opcode = "0110011");
    
-   I_type <= arith_imm or load or jalr;
+   I_type <= load or jalr or (comp_imm and BOOL_TO_SL(funct3 = "000" or funct3 = "010"));
+   IU_type <= comp_imm;
    S_type <= stor;
    SB_type <= branch;
 
@@ -136,6 +137,7 @@ begin
    x <= s1;
    
    y <= STD_LOGIC_VECTOR(resize(SIGNED(I_imm), 32))  when I_type = '1'  else
+        STD_LOGIC_VECTOR(resize(UNSIGNED(I_imm), 32))  when IU_type = '1'  else
         STD_LOGIC_VECTOR(resize(SIGNED(S_imm), 32))  when S_type = '1'  else
         s2;
 
@@ -149,7 +151,7 @@ begin
                  alu_out;
                  
    rf_we <= stall_l and ((load and load_2nd_cycle)
-                           or arith_imm or arith_reg
+                           or comp_imm or comp_reg
                            or jal
                            or jalr
                            or lui
