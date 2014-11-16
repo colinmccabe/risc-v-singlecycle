@@ -27,13 +27,13 @@ architecture Synthesizable of cpu is
    signal funct3 : STD_LOGIC_VECTOR(2 downto 0);
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
-   signal lui, jal, jalr, branch, load, comp_imm, comp_reg,
-            prog_mem_en, auipc, stor, comparison_true, eq : STD_LOGIC;
+   signal lui, jal, jalr, branch, load, comp_imm, comp_reg, memstall_1st_cycle,
+            prog_mem_en, auipc, stor, stor_word, comparison_true, eq : STD_LOGIC;
    signal data_mem_we : STD_LOGIC_VECTOR(0 downto 0);
-   signal I_type, IU_type, S_type, SB_type : STD_LOGIC;
+   signal IS_type, S_type, SB_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
-   signal load_2nd_cycle, stall_l : STD_LOGIC := '0';
+   signal memstall_2nd_cycle, stall_l : STD_LOGIC := '0';
    
    signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
    signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
@@ -118,9 +118,11 @@ begin
    load <=      BOOL_TO_SL(opcode = "0000011");
    comp_imm <= BOOL_TO_SL(opcode = "0010011");
    comp_reg <= BOOL_TO_SL(opcode = "0110011");
+
+   stor_word <= stor and BOOL_TO_SL(funct3 = "010");
    
-   I_type <= load or jalr or (comp_imm and BOOL_TO_SL(funct3 = "000" or funct3 = "010"));
-   IU_type <= comp_imm;
+   -- IS_type: I-type w/ signed arithmetic (all loads, jalr, addi, slti)
+   IS_type <= load or jalr or (comp_imm and BOOL_TO_SL(funct3 = "000" or funct3 = "010"));
    S_type <= stor;
    SB_type <= branch;
 
@@ -136,8 +138,8 @@ begin
    -- ALU operand selection
    x <= s1;
    
-   y <= STD_LOGIC_VECTOR(resize(SIGNED(I_imm), 32))  when I_type = '1'  else
-        STD_LOGIC_VECTOR(resize(UNSIGNED(I_imm), 32))  when IU_type = '1'  else
+   y <= STD_LOGIC_VECTOR(resize(SIGNED(I_imm), 32))  when IS_type = '1'  else
+        STD_LOGIC_VECTOR(resize(UNSIGNED(I_imm), 32))  when comp_imm = '1'  else
         STD_LOGIC_VECTOR(resize(SIGNED(S_imm), 32))  when S_type = '1'  else
         s2;
 
@@ -150,7 +152,7 @@ begin
                                                             when auipc = '1' else                                         
                  alu_out;
                  
-   rf_we <= stall_l and ((load and load_2nd_cycle)
+   rf_we <= stall_l and ((load and memstall_2nd_cycle)
                            or comp_imm or comp_reg
                            or jal
                            or jalr
@@ -178,10 +180,12 @@ begin
                            when jal = '1' else
                          alu_out(14 downto 0); -- jalr
 
+   -- Stall
+   memstall_1st_cycle <= (load or (stor and (not stor_word))) and (not memstall_2nd_cycle) and stall_l;
 
    -- Memory control
-   data_mem_we(0) <= stor and stall_l;
-   prog_mem_en <= not ((load or stor) and (not load_2nd_cycle));
+   data_mem_we(0) <= ((stor and memstall_2nd_cycle) or stor_word) and stall_l;
+   prog_mem_en <= not memstall_1st_cycle;
    data_addr <= alu_out(14 downto 0);
    stor_src_reg <= s2;
 
@@ -204,8 +208,8 @@ begin
                       load_data_word(31 downto 16) when others;
 
    -- Memory stor
-   byte_to_stor <= stor_src_reg(31) & stor_src_reg(6 downto 0);
-   hw_to_stor <= stor_src_reg(31) & stor_src_reg(14 downto 0);
+   byte_to_stor <= stor_src_reg(7 downto 0);
+   hw_to_stor <= stor_src_reg(15 downto 0);
 
    with data_addr(1 downto 0) select
       stor_data_byte <= load_data_word(31 downto 8) & byte_to_stor when "00",
@@ -213,7 +217,7 @@ begin
                         load_data_word(31 downto 24) & byte_to_stor & load_data_word(15 downto 0) when "10",
                         byte_to_stor & load_data_word(23 downto 0) when others;
 
-   with data_addr(0) select
+   with data_addr(1) select
       stor_data_hw <= load_data_word(31 downto 16) & hw_to_stor when '0',
                       hw_to_stor & load_data_word(15 downto 0) when others;
 
@@ -233,7 +237,7 @@ begin
    Inst_data_mem : data_mem PORT MAP (
       clka => clk,
       wea => data_mem_we,
-      addra => alu_out(14 downto 2),
+      addra => data_addr(14 downto 2),
       dina => stor_data,
       douta => load_data_word
    );
@@ -266,12 +270,12 @@ begin
             if do_jump = '1' and stall_l = '1' then
                stall_l <= '0';
                pc <= jmp_or_branch_addr;
-            elsif (load = '1' or stor = '1') and load_2nd_cycle = '0' and stall_l = '1' then
-               load_2nd_cycle <= '1';
+            elsif memstall_1st_cycle = '1' then
+               memstall_2nd_cycle <= '1';
             else
                pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 4);
                stall_l <= '1';
-               load_2nd_cycle <= '0';
+               memstall_2nd_cycle <= '0';
             end if;
          end if;
       end process;
