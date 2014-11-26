@@ -9,28 +9,38 @@ end cpu;
 
 architecture Synthesizable of cpu is
 
-   signal inst : STD_LOGIC_VECTOR(31 downto 0);
+   constant NOP : STD_LOGIC_VECTOR(31 downto 0) := x"000000" & "00010011";
+
+   signal inst1, prog_mem_out : STD_LOGIC_VECTOR(31 downto 0);
+   signal inst2 : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
    signal pc : STD_LOGIC_VECTOR(14 downto 0) := (others => '0');
    signal jmp_or_branch_addr, data_addr : STD_LOGIC_VECTOR(14 downto 0);
    
-   signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
-   signal x, y : STD_LOGIC_VECTOR(31 downto 0);
-   signal rf_data_in, alu_out, load_data_word, load_data, stor_data,
-          stor_src_reg, stor_byte, stor_hw : STD_LOGIC_VECTOR(31 downto 0);
+   signal rf_out_x, rf_out_y, rf_data_in : STD_LOGIC_VECTOR(31 downto 0);
+   signal x, y : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
+   signal x_next, y_next : STD_LOGIC_VECTOR(31 downto 0);
+
+   signal alu_out, load_data_word, load_data, stor_data,
+          stor_byte, stor_hw : STD_LOGIC_VECTOR(31 downto 0);
+
+   signal stor_data_reg : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
    signal load_hw, hw_to_stor : STD_LOGIC_VECTOR(15 downto 0);
    signal load_byte, byte_to_stor : STD_LOGIC_VECTOR(7 downto 0);
    
    signal rs1, rs2, rd : STD_LOGIC_VECTOR(4 downto 0);
    
-   signal opcode : STD_LOGIC_VECTOR(6 downto 0);
+   signal opcode, opcode1 : STD_LOGIC_VECTOR(6 downto 0);
    signal shamt : STD_LOGIC_VECTOR(4 downto 0);
-   signal funct3 : STD_LOGIC_VECTOR(2 downto 0);
+   signal funct3, funct3_1 : STD_LOGIC_VECTOR(2 downto 0);
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
    signal lui, jal, jalr, branch, load, comp_imm, comp_reg, memstall_1st_cycle,
             prog_mem_en, auipc, stor, storing_word, comparison_true, eq : STD_LOGIC;
+            
+   signal load1, jalr1, comp_imm1, stor1 : STD_LOGIC;
+
    signal data_mem_we : STD_LOGIC_VECTOR(0 downto 0);
-   signal I_type_signed, S_type, SB_type : STD_LOGIC;
+   signal I_type_signed, S_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
    signal memstall_2nd_cycle, stall_l : STD_LOGIC := '0';
@@ -69,8 +79,8 @@ architecture Synthesizable of cpu is
          data_in : IN std_logic_vector(31 downto 0);
          rs1 : IN std_logic_vector(4 downto 0);
          rs2 : IN std_logic_vector(4 downto 0);          
-         s1 : OUT std_logic_vector(31 downto 0);
-         s2 : OUT std_logic_vector(31 downto 0);
+         out_x : OUT std_logic_vector(31 downto 0);
+         out_y : OUT std_logic_vector(31 downto 0);
          reg_peek : out std_logic_vector(15 downto 0)
       );
    END COMPONENT;
@@ -98,16 +108,22 @@ architecture Synthesizable of cpu is
 
 begin
    -- Control signals
-   opcode <= inst(6 downto 0);
    
-   rs1 <= inst(19 downto 15);
-   rs2 <= inst(24 downto 20);
-   rd <= inst(11 downto 7);
+   inst1 <= NOP when do_jump = '1' else
+            prog_mem_out;
    
-   shamt <= inst(24 downto 20);
+   opcode <= inst2(6 downto 0);
+   opcode1 <= inst1(6 downto 0);
+
+   rs1 <= inst1(19 downto 15);
+   rs2 <= inst1(24 downto 20);
+   rd <= inst2(11 downto 7);
+
+   shamt <= inst2(24 downto 20);
    
-   funct3 <= inst(14 downto 12);
-   funct7 <= inst(31 downto 25);
+   funct3 <= inst2(14 downto 12);
+   funct3_1 <= inst1(14 downto 12);
+   funct7 <= inst2(31 downto 25);
    
    lui <=      BOOL_TO_SL(opcode = "0110111");
    auipc <=    BOOL_TO_SL(opcode = "0010111");
@@ -119,30 +135,34 @@ begin
    comp_imm <= BOOL_TO_SL(opcode = "0010011");
    comp_reg <= BOOL_TO_SL(opcode = "0110011");
 
+   -- 1st stage control signals, used to determine operands
+   load1 <= BOOL_TO_SL(opcode1 = "0000011");
+   jalr1 <= BOOL_TO_SL(opcode1 = "1100111");
+   comp_imm1 <= BOOL_TO_SL(opcode1 = "0010011");
+
    storing_word <= stor and BOOL_TO_SL(funct3 = "010");
    
-   I_type_signed <= load
-                     or jalr
-                     or (comp_imm and BOOL_TO_SL(funct3 = "000" or funct3 = "010"));
-   S_type <= stor;
-   SB_type <= branch;
+   I_type_signed <= load1
+                     or jalr1
+                     or (comp_imm1 and BOOL_TO_SL(funct3_1 = "000" or funct3_1 = "010"));
+   S_type <= stor1;
 
 
    -- Immediates
-   I_imm <= inst(31 downto 20);
-   S_imm <= inst(31 downto 25) & inst(11 downto 7);
-   SB_imm <= inst(31) & inst(7) & inst(30 downto 25) & inst(11 downto 8) & "0";
-   U_imm <= inst(31 downto 12) & x"000";
-   UJ_imm <= inst(31) & inst(19 downto 12) & inst(20) & inst(30 downto 21) & "0";
+   I_imm <= inst1(31 downto 20);
+   S_imm <= inst1(31 downto 25) & inst1(11 downto 7);
+   SB_imm <= inst1(31) & inst1(7) & inst1(30 downto 25) & inst1(11 downto 8) & "0";
+   U_imm <= inst2(31 downto 12) & x"000";
+   UJ_imm <= inst1(31) & inst2(19 downto 12) & inst1(20) & inst1(30 downto 21) & "0";
 
 
-   -- ALU operand selection
-   x <= s1;
+   -- ALU operands, are latched into x and y regs between stages 1 and 2
+   x_next <= rf_out_x;
    
-   y <= STD_LOGIC_VECTOR(resize(SIGNED(I_imm), 32))   when I_type_signed = '1'  else
-        STD_LOGIC_VECTOR(resize(UNSIGNED(I_imm), 32)) when comp_imm = '1'  else
+   y_next <= STD_LOGIC_VECTOR(resize(SIGNED(I_imm), 32))   when I_type_signed = '1'  else
+        STD_LOGIC_VECTOR(resize(UNSIGNED(I_imm), 32)) when comp_imm1 = '1'  else
         STD_LOGIC_VECTOR(resize(SIGNED(S_imm), 32))   when S_type = '1'  else
-        s2;
+        rf_out_y;
 
 
    -- Register file   
@@ -190,9 +210,8 @@ begin
    data_mem_we(0) <= ((stor and memstall_2nd_cycle) or storing_word) and stall_l;
    prog_mem_en <= not memstall_1st_cycle; -- Don't fetch inst on 1st cycle of memstall
    data_addr <= alu_out(14 downto 0);
-   stor_src_reg <= s2;
-   byte_to_stor <= stor_src_reg(7 downto 0);
-   hw_to_stor <= stor_src_reg(15 downto 0);
+   byte_to_stor <= stor_data_reg(7 downto 0);
+   hw_to_stor <= stor_data_reg(15 downto 0);
 
    -- Memory load
    with funct3 select
@@ -216,7 +235,7 @@ begin
    with funct3 select
       stor_data <= stor_byte when "000",
                    stor_hw when "001",
-                   stor_src_reg when others; -- stor entire reg
+                   stor_data_reg when others; -- stor entire reg
 
    with data_addr(1 downto 0) select
       stor_byte <= load_data_word(31 downto 8) & byte_to_stor when "00",
@@ -234,7 +253,7 @@ begin
       clka => clk,
       ena => prog_mem_en,
       addra => pc(14 downto 2),
-      douta => inst
+      douta => prog_mem_out
    );
   
    Inst_data_mem : data_mem PORT MAP (
@@ -252,8 +271,8 @@ begin
 		data_in => rf_data_in,
 		rs1 => rs1,
 		rs2 => rs2,
-		s1 => s1,
-		s2 => s2,
+		out_x => rf_out_x,
+		out_y => rf_out_y,
       reg_peek => reg_peek
 	);
    
@@ -272,12 +291,23 @@ begin
          if rising_edge(clk) then
             if do_jump = '1' and stall_l = '1' then
                stall_l <= '0';
+
+               inst2 <= inst1;
+
                pc <= jmp_or_branch_addr;
             elsif memstall_1st_cycle = '1' then
                memstall_2nd_cycle <= '1';
             else
+               inst2 <= inst1;
+               stor_data_reg <= rf_out_y;
+
                pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 4);
+
                stall_l <= '1';
+
+               x <= x_next;
+               y <= y_next;
+
                memstall_2nd_cycle <= '0';
             end if;
          end if;
