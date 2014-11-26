@@ -9,7 +9,7 @@ end cpu;
 
 architecture Synthesizable of cpu is
 
-   constant NOP : STD_LOGIC_VECTOR(31 downto 0) := x"000000" & "00010011";
+   constant NOP : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
 
    signal inst1, prog_mem_out : STD_LOGIC_VECTOR(31 downto 0);
    signal inst2 : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
@@ -43,7 +43,7 @@ architecture Synthesizable of cpu is
    signal I_type_signed, S_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
-   signal memstall_2nd_cycle, stall_l : STD_LOGIC := '0';
+   signal memstall_2nd_cycle : STD_LOGIC := '0';
    
    signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
    signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
@@ -137,6 +137,7 @@ begin
 
    -- 1st stage control signals, used to determine operands
    load1 <= BOOL_TO_SL(opcode1 = "0000011");
+   stor1 <= BOOL_TO_SL(opcode1 = "0100011");
    jalr1 <= BOOL_TO_SL(opcode1 = "1100111");
    comp_imm1 <= BOOL_TO_SL(opcode1 = "0010011");
 
@@ -151,9 +152,9 @@ begin
    -- Immediates
    I_imm <= inst1(31 downto 20);
    S_imm <= inst1(31 downto 25) & inst1(11 downto 7);
-   SB_imm <= inst1(31) & inst1(7) & inst1(30 downto 25) & inst1(11 downto 8) & "0";
+   SB_imm <= inst2(31) & inst2(7) & inst2(30 downto 25) & inst2(11 downto 8) & "0";
    U_imm <= inst2(31 downto 12) & x"000";
-   UJ_imm <= inst1(31) & inst2(19 downto 12) & inst1(20) & inst1(30 downto 21) & "0";
+   UJ_imm <= inst2(31) & inst2(19 downto 12) & inst2(20) & inst2(30 downto 21) & "0";
 
 
    -- ALU operands, are latched into x and y regs between stages 1 and 2
@@ -176,12 +177,12 @@ begin
                      when auipc = '1' else                                         
                  alu_out;
                  
-   rf_we <= stall_l and ((load and memstall_2nd_cycle)
-                           or comp_imm or comp_reg
-                           or jal
-                           or jalr
-                           or lui
-                           or auipc);
+   rf_we <= (load and memstall_2nd_cycle)
+               or comp_imm or comp_reg
+               or jal
+               or jalr
+               or lui
+               or auipc;
 
 
    -- PC calculation
@@ -197,17 +198,17 @@ begin
                                 );
    do_jump <= jal or jalr or (branch and comparison_true);
    
-   jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length) - 4)
+   jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length) - 8)
                            when branch = '1' else
-                         STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length) - 4)
+                         STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length) - 8)
                            when jal = '1' else
                          alu_out(14 downto 0); -- jalr
 
    -- Memory stall
-   memstall_1st_cycle <= (load or (stor and (not storing_word))) and (not memstall_2nd_cycle) and stall_l;
+   memstall_1st_cycle <= (load or (stor and (not storing_word))) and (not memstall_2nd_cycle);
 
    -- Memory signals
-   data_mem_we(0) <= ((stor and memstall_2nd_cycle) or storing_word) and stall_l;
+   data_mem_we(0) <= (stor and memstall_2nd_cycle) or storing_word;
    prog_mem_en <= not memstall_1st_cycle; -- Don't fetch inst on 1st cycle of memstall
    data_addr <= alu_out(14 downto 0);
    byte_to_stor <= stor_data_reg(7 downto 0);
@@ -289,21 +290,15 @@ begin
    process(clk)
       begin
          if rising_edge(clk) then
-            if do_jump = '1' and stall_l = '1' then
-               stall_l <= '0';
-
+            if do_jump = '1' then
                inst2 <= inst1;
-
                pc <= jmp_or_branch_addr;
             elsif memstall_1st_cycle = '1' then
                memstall_2nd_cycle <= '1';
             else
                inst2 <= inst1;
                stor_data_reg <= rf_out_y;
-
                pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 4);
-
-               stall_l <= '1';
 
                x <= x_next;
                y <= y_next;
