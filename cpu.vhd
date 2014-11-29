@@ -34,7 +34,7 @@ architecture Synthesizable of cpu is
    signal funct3, funct3_1 : STD_LOGIC_VECTOR(2 downto 0);
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
-   signal lui, jal, jalr, branch, load, comp_imm, comp_reg, memstall_1st_cycle,
+   signal lui, jal, jalr, branch, load, comp_imm, comp_reg, stall_1st_cycle,
             prog_mem_en, auipc, stor, storing_word, comparison_true, eq : STD_LOGIC;
             
    signal load1, jalr1, comp_imm1, stor1 : STD_LOGIC;
@@ -43,7 +43,7 @@ architecture Synthesizable of cpu is
    signal I_type_signed, S_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
-   signal memstall_2nd_cycle : STD_LOGIC := '0';
+   signal stall_2nd_cycle : STD_LOGIC := '0';
    
    signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
    signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
@@ -177,7 +177,7 @@ begin
                      when auipc = '1' else                                         
                  alu_out;
                  
-   rf_we <= (load and memstall_2nd_cycle)
+   rf_we <= (load and stall_2nd_cycle)
                or comp_imm or comp_reg
                or jal
                or jalr
@@ -205,11 +205,11 @@ begin
                          alu_out(14 downto 0); -- jalr
 
    -- Memory stall
-   memstall_1st_cycle <= (load or (stor and (not storing_word))) and (not memstall_2nd_cycle);
+   stall_1st_cycle <= (load or (stor and (not storing_word))) and (not stall_2nd_cycle);
 
    -- Memory signals
-   data_mem_we(0) <= (stor and memstall_2nd_cycle) or storing_word;
-   prog_mem_en <= not memstall_1st_cycle; -- Don't fetch inst on 1st cycle of memstall
+   data_mem_we(0) <= (stor and stall_2nd_cycle) or storing_word;
+   prog_mem_en <= not stall_1st_cycle; -- Don't fetch inst on 1st cycle of stall
    data_addr <= alu_out(14 downto 0);
    byte_to_stor <= stor_data_reg(7 downto 0);
    hw_to_stor <= stor_data_reg(15 downto 0);
@@ -293,8 +293,8 @@ begin
             if do_jump = '1' then
                inst2 <= inst1;
                pc <= jmp_or_branch_addr;
-            elsif memstall_1st_cycle = '1' then
-               memstall_2nd_cycle <= '1';
+            elsif stall_1st_cycle = '1' then
+               stall_2nd_cycle <= '1';
             else
                inst2 <= inst1;
                stor_data_reg <= rf_out_y;
@@ -303,7 +303,7 @@ begin
                x <= x_next;
                y <= y_next;
 
-               memstall_2nd_cycle <= '0';
+               stall_2nd_cycle <= '0';
             end if;
          end if;
       end process;

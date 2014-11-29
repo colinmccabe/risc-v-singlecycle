@@ -2,7 +2,7 @@ CONFIG VCCAUX = "3.3";
 
 NET "clk"           LOC = "H17"  | IOSTANDARD = LVTTL;
 NET "clk" TNM_NET = "clkin" ;
-TIMESPEC "TS_clkin" = PERIOD "clkin" 20000 ps INPUT_JITTER 200 ps;
+TIMESPEC "TS_clkin" = PERIOD "clkin" 20000 ps INPUT_JITTER 100 ps;
 
 NET seg(7)       LOC="L15"  | IOSTANDARD=LVTTL;
 NET seg(6)       LOC="K17"  | IOSTANDARD=LVTTL;
