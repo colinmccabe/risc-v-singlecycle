@@ -9,9 +9,14 @@ end cpu;
 
 architecture Synthesizable of cpu is
 
-   signal inst : STD_LOGIC_VECTOR(31 downto 0);
-   signal pc : STD_LOGIC_VECTOR(14 downto 0) := (others => '0');
-   signal jmp_or_branch_addr, data_addr : STD_LOGIC_VECTOR(14 downto 0);
+   constant NOP : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
+   constant INSTR_ADDR_WIDTH : integer := 14;
+   constant DATA_ADDR_WIDTH : integer := 13;
+
+   signal inst, prog_mem_out : STD_LOGIC_VECTOR(31 downto 0);
+   signal pc : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0) := (others => '0');
+   signal jmp_or_branch_addr : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0);
+   signal data_addr : STD_LOGIC_VECTOR(DATA_ADDR_WIDTH-1 downto 0);
    
    signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
    signal x, y : STD_LOGIC_VECTOR(31 downto 0);
@@ -46,7 +51,7 @@ architecture Synthesizable of cpu is
       PORT (
          clka : IN STD_LOGIC;
          ena : IN STD_LOGIC;
-         addra : IN STD_LOGIC_VECTOR(12 DOWNTO 0);
+         addra : IN STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-3 DOWNTO 0);
          douta : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
       );
    END COMPONENT;
@@ -55,7 +60,7 @@ architecture Synthesizable of cpu is
       PORT (
          clka : IN STD_LOGIC;
          wea : IN STD_LOGIC_VECTOR(0 DOWNTO 0);
-         addra : IN STD_LOGIC_VECTOR(12 DOWNTO 0);
+         addra : IN STD_LOGIC_VECTOR(DATA_ADDR_WIDTH-3 DOWNTO 0);
          dina : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
          douta : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
       );
@@ -181,18 +186,17 @@ begin
                            when branch = '1' else
                          STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length) - 4)
                            when jal = '1' else
-                         alu_out(14 downto 0); -- jalr
+                         alu_out(INSTR_ADDR_WIDTH-1 downto 0); -- jalr
 
    -- Memory stall
    memstall_1st_cycle <= (load or (stor and (not storing_word))) and (not memstall_2nd_cycle) and stall_l;
 
    -- Memory signals
-   data_mem_we(0) <= ((stor and memstall_2nd_cycle) or storing_word) and stall_l;
-   prog_mem_en <= not memstall_1st_cycle; -- Don't fetch inst on 1st cycle of memstall
-   data_addr <= alu_out(14 downto 0);
-   stor_src_reg <= s2;
-   byte_to_stor <= stor_src_reg(7 downto 0);
-   hw_to_stor <= stor_src_reg(15 downto 0);
+   data_mem_we(0) <= (stor and memstall_2nd_cycle) or storing_word;
+   prog_mem_en <= not memstall_1st_cycle; -- Don't fetch inst on 1st cycle of stall
+   data_addr <= alu_out(DATA_ADDR_WIDTH-1 downto 0);
+   byte_to_stor <= s2(7 downto 0);
+   hw_to_stor <= s2(15 downto 0);
 
    -- Memory load
    with funct3 select
@@ -233,14 +237,14 @@ begin
    Inst_prog_mem : prog_mem PORT MAP (
       clka => clk,
       ena => prog_mem_en,
-      addra => pc(14 downto 2),
+      addra => pc(INSTR_ADDR_WIDTH-1 downto 2),
       douta => inst
    );
   
    Inst_data_mem : data_mem PORT MAP (
       clka => clk,
       wea => data_mem_we,
-      addra => data_addr(14 downto 2),
+      addra => data_addr(DATA_ADDR_WIDTH-1 downto 2),
       dina => stor_data,
       douta => load_data_word
    );
