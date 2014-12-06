@@ -15,7 +15,7 @@ architecture Synthesizable of cpu is
 
    signal inst, prog_mem_out : STD_LOGIC_VECTOR(31 downto 0);
    signal pc : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0) := (others => '0');
-   signal jmp_or_branch_addr : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0);
+   signal jmp_or_branch_addr, progmem_addr : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0);
    signal data_addr : STD_LOGIC_VECTOR(DATA_ADDR_WIDTH-1 downto 0);
    
    signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
@@ -38,7 +38,7 @@ architecture Synthesizable of cpu is
    signal I_type_signed, S_type, SB_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
-   signal memstall_2nd_cycle, stall_l : STD_LOGIC := '0';
+   signal memstall_2nd_cycle : STD_LOGIC := '0';
    
    signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
    signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
@@ -161,12 +161,12 @@ begin
                      when auipc = '1' else                                         
                  alu_out;
                  
-   rf_we <= stall_l and ((load and memstall_2nd_cycle)
-                           or comp_imm or comp_reg
-                           or jal
-                           or jalr
-                           or lui
-                           or auipc);
+   rf_we <= (load and memstall_2nd_cycle)
+               or comp_imm or comp_reg
+               or jal
+               or jalr
+               or lui
+               or auipc;
 
 
    -- PC calculation
@@ -188,15 +188,19 @@ begin
                            when jal = '1' else
                          alu_out(INSTR_ADDR_WIDTH-1 downto 0); -- jalr
 
+   progmem_addr <= jmp_or_branch_addr when do_jump = '1' else
+                   pc;
+
    -- Memory stall
-   memstall_1st_cycle <= (load or (stor and (not storing_word))) and (not memstall_2nd_cycle) and stall_l;
+   memstall_1st_cycle <= (load or (stor and (not storing_word))) and (not memstall_2nd_cycle);
 
    -- Memory signals
    data_mem_we(0) <= (stor and memstall_2nd_cycle) or storing_word;
    prog_mem_en <= not memstall_1st_cycle; -- Don't fetch inst on 1st cycle of stall
    data_addr <= alu_out(DATA_ADDR_WIDTH-1 downto 0);
-   byte_to_stor <= s2(7 downto 0);
-   hw_to_stor <= s2(15 downto 0);
+   stor_src_reg <= s2;
+   byte_to_stor <= stor_src_reg(7 downto 0);
+   hw_to_stor <= stor_src_reg(15 downto 0);
 
    -- Memory load
    with funct3 select
@@ -237,7 +241,7 @@ begin
    Inst_prog_mem : prog_mem PORT MAP (
       clka => clk,
       ena => prog_mem_en,
-      addra => pc(INSTR_ADDR_WIDTH-1 downto 2),
+      addra => progmem_addr(INSTR_ADDR_WIDTH-1 downto 2),
       douta => inst
    );
   
@@ -274,14 +278,13 @@ begin
    process(clk)
       begin
          if rising_edge(clk) then
-            if do_jump = '1' and stall_l = '1' then
-               stall_l <= '0';
-               pc <= jmp_or_branch_addr;
+            if do_jump = '1' then
+               -- Set pc to 2nd inst after jump - 1st is already being fetched
+               pc <= STD_LOGIC_VECTOR(UNSIGNED(jmp_or_branch_addr) + 4);
             elsif memstall_1st_cycle = '1' then
                memstall_2nd_cycle <= '1';
             else
                pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 4);
-               stall_l <= '1';
                memstall_2nd_cycle <= '0';
             end if;
          end if;
