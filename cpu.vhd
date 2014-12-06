@@ -16,7 +16,7 @@ architecture Synthesizable of cpu is
    signal inst1, prog_mem_out : STD_LOGIC_VECTOR(31 downto 0);
    signal inst2 : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
    signal pc : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0) := (others => '0');
-   signal jmp_or_branch_addr : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0);
+   signal jmp_or_branch_addr, prog_mem_addr : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0);
    signal data_addr : STD_LOGIC_VECTOR(DATA_ADDR_WIDTH-1 downto 0);
    
    signal rf_out_x, rf_out_y, rf_data_in : STD_LOGIC_VECTOR(31 downto 0);
@@ -46,7 +46,7 @@ architecture Synthesizable of cpu is
    signal I_type_signed, S_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
-   signal stall_2nd_cycle, just_jumped : STD_LOGIC := '0';
+   signal stall_2nd_cycle : STD_LOGIC := '0';
    
    signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
    signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
@@ -112,7 +112,7 @@ architecture Synthesizable of cpu is
 begin
    -- Control signals
    
-   inst1 <= NOP when do_jump = '1' or just_jumped = '1' else
+   inst1 <= NOP when do_jump = '1' else
             prog_mem_out;
    
    opcode <= inst2(6 downto 0);
@@ -206,6 +206,9 @@ begin
                          STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length) - 8)
                            when jal = '1' else
                          alu_out(INSTR_ADDR_WIDTH-1 downto 0); -- jalr
+                         
+   prog_mem_addr <= jmp_or_branch_addr when do_jump = '1' else
+                    pc;
 
    -- Memory stall
    stall_1st_cycle <= (load or (stor and (not storing_word))) and (not stall_2nd_cycle);
@@ -256,7 +259,7 @@ begin
    Inst_prog_mem : prog_mem PORT MAP (
       clka => clk,
       ena => prog_mem_en,
-      addra => pc(INSTR_ADDR_WIDTH-1 downto 2),
+      addra => prog_mem_addr(INSTR_ADDR_WIDTH-1 downto 2),
       douta => prog_mem_out
    );
   
@@ -295,11 +298,9 @@ begin
          if rising_edge(clk) then
             if do_jump = '1' then
                inst2 <= inst1;
-               pc <= jmp_or_branch_addr;
-               just_jumped <= '1';
+               pc <= STD_LOGIC_VECTOR(UNSIGNED(jmp_or_branch_addr) + 4);
             elsif stall_1st_cycle = '1' then
                stall_2nd_cycle <= '1';
-               just_jumped <= '0';
             else
                inst2 <= inst1;
                stor_data_reg <= rf_out_y;
@@ -309,7 +310,6 @@ begin
                y <= y_next;
 
                stall_2nd_cycle <= '0';
-               just_jumped <= '0';
             end if;
          end if;
       end process;
