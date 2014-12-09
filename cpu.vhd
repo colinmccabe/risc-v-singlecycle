@@ -40,7 +40,7 @@ architecture Synthesizable of cpu is
    signal lui, jal, jalr, branch, load, comp_imm, comp_reg, stall_1st_cycle,
             prog_mem_en, auipc, stor, storing_word, comparison_true, eq : STD_LOGIC;
             
-   signal load1, jalr1, comp_imm1, stor1 : STD_LOGIC;
+   signal load1, jalr1, comp_imm1, stor1, jal1 : STD_LOGIC;
 
    signal data_mem_we : STD_LOGIC_VECTOR(0 downto 0);
    signal I_type_signed, S_type : STD_LOGIC;
@@ -53,6 +53,8 @@ architecture Synthesizable of cpu is
    signal U_imm : STD_LOGIC_VECTOR(31 downto 0);
    signal UJ_imm : STD_LOGIC_VECTOR(20 downto 0);
    
+   signal jal_ret_addr : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
+
    signal alu_output_true, rf_we : STD_LOGIC;
 
    COMPONENT prog_mem
@@ -112,7 +114,7 @@ architecture Synthesizable of cpu is
 begin
    -- Control signals
    
-   inst1 <= NOP when do_jump = '1' else
+   inst1 <= NOP when jalr = '1' or (branch = '1' and comparison_true = '1') else
             prog_mem_out;
    
    opcode <= inst2(6 downto 0);
@@ -141,6 +143,7 @@ begin
    -- 1st stage control signals, used to determine operands
    load1 <= BOOL_TO_SL(opcode1 = "0000011");
    stor1 <= BOOL_TO_SL(opcode1 = "0100011");
+   jal1 <= BOOL_TO_SL(opcode1 = "1101111");
    jalr1 <= BOOL_TO_SL(opcode1 = "1100111");
    comp_imm1 <= BOOL_TO_SL(opcode1 = "0010011");
 
@@ -157,7 +160,7 @@ begin
    S_imm <= inst1(31 downto 25) & inst1(11 downto 7);
    SB_imm <= inst2(31) & inst2(7) & inst2(30 downto 25) & inst2(11 downto 8) & "0";
    U_imm <= inst2(31 downto 12) & x"000";
-   UJ_imm <= inst2(31) & inst2(19 downto 12) & inst2(20) & inst2(30 downto 21) & "0";
+   UJ_imm <= inst1(31) & inst1(19 downto 12) & inst1(20) & inst1(30 downto 21) & "0";
 
 
    -- ALU operands, are latched into x and y regs between stages 1 and 2
@@ -170,8 +173,10 @@ begin
 
 
    -- Register file   
-   rf_data_in <= STD_LOGIC_VECTOR(resize(UNSIGNED(pc), 32))
-                     when jal = '1' or jalr = '1' else
+   rf_data_in <= STD_LOGIC_VECTOR(resize(UNSIGNED(pc), 32) - 4)
+                     when jalr = '1' else
+                 jal_ret_addr
+                     when jal = '1' else
                  U_imm
                      when lui = '1'   else
                  load_data
@@ -199,13 +204,13 @@ begin
                                    or
                                  ((alu_out(0) = '0' or eq = '1') and (funct3 = "101" or funct3 = "111")) --bge/bgeu
                                 );
-   do_jump <= jal or jalr or (branch and comparison_true);
+   do_jump <= jal1 or jalr or (branch and comparison_true);
    
    jmp_or_branch_addr <= STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(SB_imm), pc'length) - 8)
                            when branch = '1' else
-                         STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length) - 8)
-                           when jal = '1' else
-                         alu_out(INSTR_ADDR_WIDTH-1 downto 0); -- jalr
+                         alu_out(INSTR_ADDR_WIDTH-1 downto 0)
+                           when jalr = '1' else
+                         STD_LOGIC_VECTOR(SIGNED(pc) + resize(SIGNED(UJ_imm), pc'length) - 4); -- jal
                          
    prog_mem_addr <= jmp_or_branch_addr when do_jump = '1' else
                     pc;
@@ -296,6 +301,11 @@ begin
    process(clk)
       begin
          if rising_edge(clk) then
+            -- jal: save return addr in special reg b/c jal resolved in stage 2
+            jal_ret_addr <= STD_LOGIC_VECTOR(resize(UNSIGNED(pc), 32));
+            -- Save stor data obtained in stage 2 to a reg for use in stage 3
+            stor_data_reg <= rf_out_y;
+
             if do_jump = '1' then
                inst2 <= inst1;
                pc <= STD_LOGIC_VECTOR(UNSIGNED(jmp_or_branch_addr) + 4);
@@ -303,7 +313,6 @@ begin
                stall_2nd_cycle <= '1';
             else
                inst2 <= inst1;
-               stor_data_reg <= rf_out_y;
                pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 4);
 
                x <= x_next;
