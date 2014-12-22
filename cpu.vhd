@@ -4,7 +4,18 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity cpu is
     Port ( clk : in  STD_LOGIC;
-           reg_peek : out  STD_LOGIC_VECTOR (15 downto 0));
+           reg_peek : out  STD_LOGIC_VECTOR (15 downto 0);
+           -- Wishbone bus
+           wb_rst_o : out  STD_LOGIC;
+           wb_adr_o : out  STD_LOGIC_VECTOR (10 downto 0);
+           wb_dat_i : in  STD_LOGIC_VECTOR (31 downto 0);
+           wb_dat_o : out  STD_LOGIC_VECTOR (31 downto 0);
+           wb_sel_o : out STD_LOGIC_VECTOR(3 downto 0);
+           wb_tgd_o : out STD_LOGIC;
+           wb_we_o : out  STD_LOGIC;
+           wb_stb_o : out  STD_LOGIC;
+           wb_cyc_o : out  STD_LOGIC;
+           wb_ack_i : in  STD_LOGIC);
 end cpu;
 
 architecture Synthesizable of cpu is
@@ -13,17 +24,14 @@ architecture Synthesizable of cpu is
    constant INSTR_ADDR_WIDTH : integer := 14;
    constant DATA_ADDR_WIDTH : integer := 13;
 
-   signal inst, prog_mem_out : STD_LOGIC_VECTOR(31 downto 0);
+   signal inst : STD_LOGIC_VECTOR(31 downto 0);
    signal pc : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0) := (others => '0');
    signal jmp_or_branch_addr, progmem_addr : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0);
-   signal data_addr : STD_LOGIC_VECTOR(DATA_ADDR_WIDTH-1 downto 0);
+   signal data_mem_addr : STD_LOGIC_VECTOR(DATA_ADDR_WIDTH-3 downto 0);
    
    signal s1, s2 : STD_LOGIC_VECTOR(31 downto 0);
    signal x, y : STD_LOGIC_VECTOR(31 downto 0);
-   signal rf_data_in, alu_out, load_data_word, load_data, stor_data,
-          stor_src_reg, stor_byte, stor_hw : STD_LOGIC_VECTOR(31 downto 0);
-   signal load_hw, hw_to_stor : STD_LOGIC_VECTOR(15 downto 0);
-   signal load_byte, byte_to_stor : STD_LOGIC_VECTOR(7 downto 0);
+   signal rf_data_in, alu_out, load_data, stor_src_reg : STD_LOGIC_VECTOR(31 downto 0);
    
    signal rs1, rs2, rd : STD_LOGIC_VECTOR(4 downto 0);
    
@@ -32,36 +40,26 @@ architecture Synthesizable of cpu is
    signal funct3 : STD_LOGIC_VECTOR(2 downto 0);
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
-   signal lui, jal, jalr, branch, load, comp_imm, comp_reg, memstall_1st_cycle,
-            prog_mem_en, auipc, stor, storing_word, comparison_true, eq : STD_LOGIC;
-   signal data_mem_we : STD_LOGIC_VECTOR(0 downto 0);
+   signal lui, jal, jalr, branch, load, comp_imm, comp_reg, stall,
+            prog_mem_en, auipc, stor, comparison_true, eq : STD_LOGIC;
    signal I_type_signed, S_type, SB_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
-   signal memstall_2nd_cycle : STD_LOGIC := '0';
+   signal mem_op, mem_done, mem_load_unsigned : STD_LOGIC;
+   signal mem_sel, byte_sel, hw_sel : STD_LOGIC_VECTOR(3 downto 0);
    
    signal I_imm, S_imm : STD_LOGIC_VECTOR(11 downto 0);
    signal SB_imm : STD_LOGIC_VECTOR(12 downto 0);
    signal U_imm : STD_LOGIC_VECTOR(31 downto 0);
    signal UJ_imm : STD_LOGIC_VECTOR(20 downto 0);
    
-   signal alu_output_true, rf_we : STD_LOGIC;
+   signal rf_we : STD_LOGIC;
 
    COMPONENT prog_mem
       PORT (
          clka : IN STD_LOGIC;
          ena : IN STD_LOGIC;
          addra : IN STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-3 DOWNTO 0);
-         douta : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
-      );
-   END COMPONENT;
-
-   COMPONENT data_mem
-      PORT (
-         clka : IN STD_LOGIC;
-         wea : IN STD_LOGIC_VECTOR(0 DOWNTO 0);
-         addra : IN STD_LOGIC_VECTOR(DATA_ADDR_WIDTH-3 DOWNTO 0);
-         dina : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
          douta : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
       );
    END COMPONENT;
@@ -123,8 +121,6 @@ begin
    load <=     BOOL_TO_SL(opcode = "0000011");
    comp_imm <= BOOL_TO_SL(opcode = "0010011");
    comp_reg <= BOOL_TO_SL(opcode = "0110011");
-
-   storing_word <= stor and BOOL_TO_SL(funct3 = "010");
    
    I_type_signed <= load
                      or jalr
@@ -161,7 +157,7 @@ begin
                      when auipc = '1' else                                         
                  alu_out;
                  
-   rf_we <= (load and memstall_2nd_cycle)
+   rf_we <= (load and (not stall))
                or comp_imm or comp_reg
                or jal
                or jalr
@@ -192,50 +188,46 @@ begin
                    pc;
 
    -- Memory stall
-   memstall_1st_cycle <= (load or (stor and (not storing_word))) and (not memstall_2nd_cycle);
+   mem_op <= load or stor;
 
    -- Memory signals
-   data_mem_we(0) <= (stor and memstall_2nd_cycle) or storing_word;
-   prog_mem_en <= not memstall_1st_cycle; -- Don't fetch inst on 1st cycle of stall
-   data_addr <= alu_out(DATA_ADDR_WIDTH-1 downto 0);
+   prog_mem_en <= not stall; -- Don't fetch inst on 1st cycle of stall
+   data_mem_addr <= alu_out(DATA_ADDR_WIDTH-1 downto 2);
    stor_src_reg <= s2;
-   byte_to_stor <= stor_src_reg(7 downto 0);
-   hw_to_stor <= stor_src_reg(15 downto 0);
-
-   -- Memory load
+   mem_load_unsigned <= BOOL_TO_SL(funct3 = "100" or funct3 = "101");
+   
+   wb_rst_o <= '0';
+   wb_adr_o <= data_mem_addr;
+   wb_dat_o <= stor_src_reg;
+   wb_tgd_o <= mem_load_unsigned;
+   wb_sel_o <= mem_sel;
+   wb_we_o <= stor;
+   wb_stb_o <= mem_op;
+   wb_cyc_o <= mem_op;
+   load_data <= wb_dat_i;
+   mem_done <= wb_ack_i;
+   
+   stall <= mem_op and (not mem_done);
+   
    with funct3 select
-      load_data <= STD_LOGIC_VECTOR(resize(SIGNED(load_byte), 32)) when "000",
-                   STD_LOGIC_VECTOR(resize(SIGNED(load_hw), 32)) when "001",
-                   STD_LOGIC_VECTOR(resize(UNSIGNED(load_byte), 32)) when "100",
-                   STD_LOGIC_VECTOR(resize(UNSIGNED(load_hw), 32)) when "101",
-                   load_data_word when others;
-
-   with data_addr(1 downto 0) select
-      load_byte <= load_data_word(7 downto 0) when "00",
-                   load_data_word(15 downto 8) when "01",
-                   load_data_word(23 downto 16) when "10",
-                   load_data_word(31 downto 24) when others;
-
-   with data_addr(1) select
-      load_hw <= load_data_word(15 downto 0) when '0',
-                 load_data_word(31 downto 16) when others;
-
-   -- Memory stor
-   with funct3 select
-      stor_data <= stor_byte when "000",
-                   stor_hw when "001",
-                   stor_src_reg when others; -- stor entire reg
-
-   with data_addr(1 downto 0) select
-      stor_byte <= load_data_word(31 downto 8) & byte_to_stor when "00",
-                   load_data_word(31 downto 16) & byte_to_stor & load_data_word(7 downto 0) when "01",
-                   load_data_word(31 downto 24) & byte_to_stor & load_data_word(15 downto 0) when "10",
-                   byte_to_stor & load_data_word(23 downto 0) when others;
-
-   with data_addr(1) select
-      stor_hw <= load_data_word(31 downto 16) & hw_to_stor when '0',
-                 hw_to_stor & load_data_word(15 downto 0) when others;
-
+      mem_sel <=
+         byte_sel when "000",
+         byte_sel when "100",
+         hw_sel when "001",
+         hw_sel when "101",
+         "1111" when others;
+         
+   with alu_out(1 downto 0) select
+      byte_sel <=
+         "0001" when "00",
+         "0010" when "01",
+         "0100" when "10",
+         "1000" when others;
+         
+   with alu_out(1) select
+      hw_sel <=
+         "0011" when '0',
+         "1100" when others;
 
    -- Modules
    Inst_prog_mem : prog_mem PORT MAP (
@@ -243,14 +235,6 @@ begin
       ena => prog_mem_en,
       addra => progmem_addr(INSTR_ADDR_WIDTH-1 downto 2),
       douta => inst
-   );
-  
-   Inst_data_mem : data_mem PORT MAP (
-      clka => clk,
-      wea => data_mem_we,
-      addra => data_addr(DATA_ADDR_WIDTH-1 downto 2),
-      dina => stor_data,
-      douta => load_data_word
    );
    
    Inst_rf: rf PORT MAP(
@@ -281,11 +265,10 @@ begin
             if do_jump = '1' then
                -- Set pc to 2nd inst after jump - 1st is already being fetched
                pc <= STD_LOGIC_VECTOR(UNSIGNED(jmp_or_branch_addr) + 4);
-            elsif memstall_1st_cycle = '1' then
-               memstall_2nd_cycle <= '1';
+            elsif stall = '1' then
+               -- Do nothing
             else
                pc <= STD_LOGIC_VECTOR(UNSIGNED(pc) + 4);
-               memstall_2nd_cycle <= '0';
             end if;
          end if;
       end process;
