@@ -4,7 +4,18 @@ use IEEE.NUMERIC_STD.ALL;
 
 entity cpu is
     Port ( clk : in  STD_LOGIC;
-           reg_peek : out  STD_LOGIC_VECTOR (15 downto 0));
+           reg_peek : out  STD_LOGIC_VECTOR (15 downto 0);
+           -- Wishbone bus
+           wb_rst_o : out  STD_LOGIC;
+           wb_adr_o : out  STD_LOGIC_VECTOR (10 downto 0);
+           wb_dat_i : in  STD_LOGIC_VECTOR (31 downto 0);
+           wb_dat_o : out  STD_LOGIC_VECTOR (31 downto 0);
+           wb_sel_o : out STD_LOGIC_VECTOR(3 downto 0);
+           wb_tgd_o : out STD_LOGIC;
+           wb_we_o : out  STD_LOGIC;
+           wb_stb_o : out  STD_LOGIC;
+           wb_cyc_o : out  STD_LOGIC;
+           wb_ack_i : in  STD_LOGIC);
 end cpu;
 
 architecture Synthesizable of cpu is
@@ -50,22 +61,6 @@ architecture Synthesizable of cpu is
          ena : IN STD_LOGIC;
          addra : IN STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-3 DOWNTO 0);
          douta : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
-      );
-   END COMPONENT;
-
-   COMPONENT data_mem_wb
-      PORT(
-         wb_clk_i : IN std_logic;
-         wb_rst_i : IN std_logic;
-         wb_adr_i : IN std_logic_vector(DATA_ADDR_WIDTH-3 downto 0);
-         wb_dat_i : IN std_logic_vector(31 downto 0);
-         wb_sel_i : in STD_LOGIC_VECTOR(3 downto 0);
-         wb_tgd_i : in STD_LOGIC;
-         wb_we_i : IN std_logic;
-         wb_stb_i : IN std_logic;
-         wb_cyc_i : IN std_logic;
-         wb_dat_o : OUT std_logic_vector(31 downto 0);
-         wb_ack_o : OUT std_logic
       );
    END COMPONENT;
    
@@ -201,6 +196,17 @@ begin
    stor_src_reg <= s2;
    mem_load_unsigned <= BOOL_TO_SL(funct3 = "100" or funct3 = "101");
    
+   wb_rst_o <= '0';
+   wb_adr_o <= data_mem_addr;
+   wb_dat_o <= stor_src_reg;
+   wb_tgd_o <= mem_load_unsigned;
+   wb_sel_o <= mem_sel;
+   wb_we_o <= stor;
+   wb_stb_o <= mem_op;
+   wb_cyc_o <= mem_op;
+   load_data <= wb_dat_i;
+   mem_done <= wb_ack_i;
+   
    stall <= mem_op and (not mem_done);
    
    with funct3 select
@@ -222,21 +228,6 @@ begin
       hw_sel <=
          "0011" when '0',
          "1100" when others;
-
-   
-   Inst_data_mem_wb: data_mem_wb PORT MAP(
-		wb_clk_i => clk,
-		wb_rst_i => '0',
-		wb_adr_i => data_mem_addr,
-		wb_dat_i => stor_src_reg,
-		wb_dat_o => load_data,
-      wb_tgd_i => mem_load_unsigned,
-      wb_sel_i => mem_sel,
-		wb_we_i => stor,
-		wb_stb_i => mem_op,
-		wb_cyc_i => mem_op,
-		wb_ack_o => mem_done
-	);
 
    -- Modules
    Inst_prog_mem : prog_mem PORT MAP (
