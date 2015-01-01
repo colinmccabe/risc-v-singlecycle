@@ -5,7 +5,7 @@ use IEEE.NUMERIC_STD.ALL;
 entity data_mem_wb is
     Port ( wb_clk_i : in  STD_LOGIC;
            wb_rst_i : in  STD_LOGIC;
-           wb_adr_i : in  STD_LOGIC_VECTOR (10 downto 0);
+           wb_adr_i : in  STD_LOGIC_VECTOR (11 downto 0);
            wb_dat_i : in  STD_LOGIC_VECTOR (31 downto 0);
            wb_dat_o : out  STD_LOGIC_VECTOR (31 downto 0);
            wb_sel_i : in STD_LOGIC_VECTOR(3 downto 0);
@@ -13,7 +13,11 @@ entity data_mem_wb is
            wb_we_i : in  STD_LOGIC;
            wb_stb_i : in  STD_LOGIC;
            wb_cyc_i : in  STD_LOGIC;
-           wb_ack_o : out  STD_LOGIC);
+           wb_ack_o : out  STD_LOGIC;
+           -- Progmem
+           prog_mem_en : in STD_LOGIC;
+           prog_mem_addr : in STD_LOGIC_VECTOR(11 downto 0);
+           prog_mem_inst : out STD_LOGIC_VECTOR(31 downto 0));
 end data_mem_wb;
 
 architecture Behavioral of data_mem_wb is
@@ -32,9 +36,15 @@ architecture Behavioral of data_mem_wb is
       PORT (
          clka : IN STD_LOGIC;
          wea : IN STD_LOGIC_VECTOR(0 DOWNTO 0);
-         addra : IN STD_LOGIC_VECTOR(wb_adr_i'length-1 DOWNTO 0);
+         addra : IN STD_LOGIC_VECTOR(11 DOWNTO 0);
          dina : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
-         douta : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
+         douta : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
+         clkb : IN STD_LOGIC;
+         enb : IN STD_LOGIC;
+         web : IN STD_LOGIC_VECTOR(0 DOWNTO 0);
+         addrb : IN STD_LOGIC_VECTOR(11 DOWNTO 0);
+         dinb : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
+         doutb : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
       );
    END COMPONENT;
    
@@ -105,13 +115,20 @@ begin
       hw_stor_data <= 
          blk_ram_out(31 downto 16) & hw_to_stor when "0011",
          hw_to_stor & blk_ram_out(15 downto 0) when others;
-
+   
+   
    Inst_data_mem : data_mem PORT MAP (
       clka => wb_clk_i,
       wea => blk_ram_we,
       addra => wb_adr_i,
       dina => stor_data,
-      douta => blk_ram_out
+      douta => blk_ram_out,
+      clkb => wb_clk_i,
+      enb => prog_mem_en,
+      web => "0",
+      addrb => prog_mem_addr,
+      dinb => (others => '0'),
+      doutb => prog_mem_inst
    );
    
    process(wb_clk_i)

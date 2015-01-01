@@ -17,7 +17,7 @@ end rf;
 architecture Synthesizable of rf is
 
    type reg_array is array(1 to 31) of STD_LOGIC_VECTOR(31 downto 0);
-   signal reg_file : reg_array;
+   signal reg_file : reg_array := (others => (others => '0'));
    
 begin
 

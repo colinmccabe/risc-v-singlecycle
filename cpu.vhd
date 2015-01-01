@@ -7,7 +7,7 @@ entity cpu is
            reg_peek : out  STD_LOGIC_VECTOR (15 downto 0);
            -- Wishbone bus
            wb_rst_o : out  STD_LOGIC;
-           wb_adr_o : out  STD_LOGIC_VECTOR (10 downto 0);
+           wb_adr_o : out  STD_LOGIC_VECTOR (11 downto 0);
            wb_dat_i : in  STD_LOGIC_VECTOR (31 downto 0);
            wb_dat_o : out  STD_LOGIC_VECTOR (31 downto 0);
            wb_sel_o : out STD_LOGIC_VECTOR(3 downto 0);
@@ -15,14 +15,18 @@ entity cpu is
            wb_we_o : out  STD_LOGIC;
            wb_stb_o : out  STD_LOGIC;
            wb_cyc_o : out  STD_LOGIC;
-           wb_ack_i : in  STD_LOGIC);
+           wb_ack_i : in  STD_LOGIC;
+           -- Progmem
+           prog_mem_en : out STD_LOGIC;
+           prog_mem_addr : out STD_LOGIC_VECTOR(11 downto 0);
+           prog_mem_inst : in STD_LOGIC_VECTOR(31 downto 0));
 end cpu;
 
 architecture Synthesizable of cpu is
 
    constant NOP : STD_LOGIC_VECTOR(31 downto 0) := (others => '0');
    constant INSTR_ADDR_WIDTH : integer := 14;
-   constant DATA_ADDR_WIDTH : integer := 13;
+   constant DATA_ADDR_WIDTH : integer := 14;
 
    signal inst : STD_LOGIC_VECTOR(31 downto 0);
    signal pc : STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-1 downto 0) := (others => '0');
@@ -41,7 +45,7 @@ architecture Synthesizable of cpu is
    signal funct7 : STD_LOGIC_VECTOR(6 downto 0);
    
    signal lui, jal, jalr, branch, load, comp_imm, comp_reg, stall,
-            prog_mem_en, auipc, stor, comparison_true, eq : STD_LOGIC;
+            auipc, stor, comparison_true, eq : STD_LOGIC;
    signal I_type_signed, S_type, SB_type : STD_LOGIC;
    signal do_jump : STD_LOGIC;
    
@@ -54,15 +58,6 @@ architecture Synthesizable of cpu is
    signal UJ_imm : STD_LOGIC_VECTOR(20 downto 0);
    
    signal rf_we : STD_LOGIC;
-
-   COMPONENT prog_mem
-      PORT (
-         clka : IN STD_LOGIC;
-         ena : IN STD_LOGIC;
-         addra : IN STD_LOGIC_VECTOR(INSTR_ADDR_WIDTH-3 DOWNTO 0);
-         douta : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
-      );
-   END COMPONENT;
    
    COMPONENT rf
       PORT(
@@ -100,6 +95,7 @@ architecture Synthesizable of cpu is
       end BOOL_TO_SL;
 
 begin
+   inst <= prog_mem_inst;
    -- Control signals
    opcode <= inst(6 downto 0);
    
@@ -184,8 +180,8 @@ begin
                            when jal = '1' else
                          alu_out(INSTR_ADDR_WIDTH-1 downto 0); -- jalr
 
-   progmem_addr <= jmp_or_branch_addr when do_jump = '1' else
-                   pc;
+   prog_mem_addr <= jmp_or_branch_addr(13 downto 2) when do_jump = '1' else
+                    pc(13 downto 2);
 
    -- Memory stall
    mem_op <= load or stor;
@@ -228,14 +224,6 @@ begin
       hw_sel <=
          "0011" when '0',
          "1100" when others;
-
-   -- Modules
-   Inst_prog_mem : prog_mem PORT MAP (
-      clka => clk,
-      ena => prog_mem_en,
-      addra => progmem_addr(INSTR_ADDR_WIDTH-1 downto 2),
-      douta => inst
-   );
    
    Inst_rf: rf PORT MAP(
 		clk => clk,
